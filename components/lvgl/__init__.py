@@ -439,7 +439,7 @@ LVGL_SCHEMA = cv.All(
                 ): cv.boolean,
                 cv.Optional(CONF_DRAW_ROUNDING, default=2): cv.positive_int,
                 cv.Optional(CONF_BUFFER_SIZE, default=0): cv.percentage,
-                cv.Optional(CONF_LOG_LEVEL, default="WARN"): cv.one_of(
+                cv.Optional(CONF_LOG_LEVEL, default="ERROR"): cv.one_of(
                     *df.LV_LOG_LEVELS, upper=True
                 ),
                 cv.Optional(CONF_BYTE_ORDER, default="big_endian"): cv.one_of(
