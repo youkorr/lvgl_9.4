@@ -13,14 +13,19 @@ static const char *const TAG = "font";
 #ifdef USE_LVGL_FONT
 // LVGL 9.x compatible implementation
 const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *draw_buf) {
-  ESP_LOGD(TAG, "get_glyph_bitmap: ENTER");
+  ESP_LOGD(TAG, "get_glyph_bitmap: ENTER, draw_buf=%p", (void *) draw_buf);
 
   // Safety checks to prevent crashes from null pointers
   if (g_dsc == nullptr) {
     ESP_LOGE(TAG, "get_glyph_bitmap: g_dsc is null");
     return nullptr;
   }
-  ESP_LOGD(TAG, "get_glyph_bitmap: g_dsc=%p, gid.index=0x%08X", (void *) g_dsc, g_dsc->gid.index);
+
+  // Log all important fields of g_dsc to debug what LVGL passes to us
+  ESP_LOGD(TAG, "get_glyph_bitmap: g_dsc=%p, gid.index=0x%08X, format=%d, stride=%d", (void *) g_dsc, g_dsc->gid.index,
+           g_dsc->format, g_dsc->stride);
+  ESP_LOGD(TAG, "get_glyph_bitmap: box=%dx%d, ofs=(%d,%d), adv_w=%d", g_dsc->box_w, g_dsc->box_h, g_dsc->ofs_x,
+           g_dsc->ofs_y, g_dsc->adv_w);
 
   if (g_dsc->resolved_font == nullptr) {
     ESP_LOGE(TAG, "get_glyph_bitmap: resolved_font is null for glyph 0x%08X", g_dsc->gid.index);
@@ -270,8 +275,12 @@ Font::Font(const Glyph *data, int data_nr, int baseline, int height, int descend
 #ifdef USE_LVGL_FONT
   ESP_LOGI(TAG, "LVGL font init: line_height=%d, base_line=%d", this->get_height(),
            this->get_height() - this->get_baseline());
-  // Ensure all fields are properly initialized to prevent crashes
-  // The lv_font_{} initializer zeros everything, but we explicitly set critical fields
+
+  // CRITICAL: Zero the entire lv_font_t structure first to ensure NO garbage values
+  // LVGL 9.x may have additional fields (user_data, etc.) that could cause crashes if uninitialized
+  memset(&this->lv_font_, 0, sizeof(lv_font_t));
+
+  // Now set all required fields
   this->lv_font_.dsc = this;
   this->lv_font_.line_height = this->get_height();
   this->lv_font_.base_line = this->lv_font_.line_height - this->get_baseline();
@@ -289,6 +298,8 @@ Font::Font(const Glyph *data, int data_nr, int baseline, int height, int descend
   this->lv_font_.static_bitmap = 1;
   // release_glyph callback not needed for static bitmaps
   this->lv_font_.release_glyph = nullptr;
+  // user_data must be nullptr for LVGL 9.x
+  this->lv_font_.user_data = nullptr;
 #else
   ESP_LOGW(TAG, "USE_LVGL_FONT not defined - LVGL font callbacks not initialized!");
 #endif
