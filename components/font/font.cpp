@@ -13,15 +13,21 @@ static const char *const TAG = "font";
 #ifdef USE_LVGL_FONT
 // LVGL 9.x compatible implementation
 const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *draw_buf) {
+  ESP_LOGD(TAG, "get_glyph_bitmap: ENTER");
+
   // Safety checks to prevent crashes from null pointers
   if (g_dsc == nullptr) {
     ESP_LOGE(TAG, "get_glyph_bitmap: g_dsc is null");
     return nullptr;
   }
+  ESP_LOGD(TAG, "get_glyph_bitmap: g_dsc=%p, gid.index=0x%08X", (void *) g_dsc, g_dsc->gid.index);
+
   if (g_dsc->resolved_font == nullptr) {
     ESP_LOGE(TAG, "get_glyph_bitmap: resolved_font is null for glyph 0x%08X", g_dsc->gid.index);
     return nullptr;
   }
+  ESP_LOGD(TAG, "get_glyph_bitmap: resolved_font=%p", (void *) g_dsc->resolved_font);
+
   if (g_dsc->resolved_font->dsc == nullptr) {
     ESP_LOGE(TAG, "get_glyph_bitmap: font dsc is null for glyph 0x%08X", g_dsc->gid.index);
     return nullptr;
@@ -29,6 +35,7 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
 
   // Extract the font from the resolved_font field
   auto *fe = (Font *) g_dsc->resolved_font->dsc;
+  ESP_LOGD(TAG, "get_glyph_bitmap: Font ptr=%p, bpp=%d", (void *) fe, fe->get_bpp());
 
   // Get the unicode letter from the glyph ID
   uint32_t unicode_letter = g_dsc->gid.index;
@@ -39,11 +46,20 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
     return nullptr;
   }
 
+  ESP_LOGD(TAG, "get_glyph_bitmap: glyph 0x%04X found, data=%p, w=%d, h=%d", unicode_letter, (void *) gd->data,
+           gd->width, gd->height);
+
   // Sanity check glyph data pointer
   if (gd->data == nullptr && gd->width > 0 && gd->height > 0) {
     ESP_LOGE(TAG, "get_glyph_bitmap: glyph 0x%08X has null data but non-zero dimensions", unicode_letter);
     return nullptr;
   }
+
+  // Calculate expected data size for debugging
+  int stride = (gd->width * fe->get_bpp() + 7) / 8;
+  int expected_size = stride * gd->height;
+  ESP_LOGD(TAG, "get_glyph_bitmap: returning data=%p, stride=%d, expected_size=%d bytes", (void *) gd->data, stride,
+           expected_size);
 
   return gd->data;
 }
@@ -76,9 +92,8 @@ bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uin
   ESP_LOGD(TAG, "get_glyph_dsc_cb: found glyph 0x%04X, w=%d, h=%d, adv=%d", unicode_letter, gd->width, gd->height,
            gd->advance);
 
-  // Initialize all dsc fields to safe defaults first (LVGL 9.x requirement)
-  // This ensures no uninitialized fields cause crashes
-  memset(dsc, 0, sizeof(lv_font_glyph_dsc_t));
+  // Note: Do NOT memset the entire dsc structure - LVGL may have pre-initialized some fields
+  // Only set the fields that we need to populate
 
   dsc->adv_w = gd->advance;
   dsc->ofs_x = gd->offset_x;
@@ -117,6 +132,9 @@ bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uin
 
   // Set resolved_font to allow bitmap callback to access the font
   dsc->resolved_font = font;
+
+  ESP_LOGD(TAG, "get_glyph_dsc_cb: completed - format=%d, stride=%d, box=%dx%d, ofs=(%d,%d)", (int) dsc->format,
+           dsc->stride, dsc->box_w, dsc->box_h, dsc->ofs_x, dsc->ofs_y);
 
   return true;
 }
