@@ -179,20 +179,17 @@ http_request:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "bVPsAjfqeBGHbkcWA/EDvrdTgwIMuiAxUqBvIn7uWBI="
+    key:
 
 ota:
-  - platform: esphome
-    password: "ef0f5b5140fae6d1ee441d1b21bcad83"
+
 
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Tab10 Fallback Hotspot"
-    password: "nu3OUSShbUED"
+
 
 captive_portal:
 
@@ -281,17 +278,7 @@ external_components:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
       ref: main
-        #claude/fix-ov02c10-resolution-KvLfB
-      #claude/fix-ov02c10-resolution-KvLfB
-      #claude/reorganize-camera-modules-QUFxc
-      #claude/fix-sc202cs-resolution-01RtttvdEZUBWg8EunW5Toqa
-      #claude/fix-lvgl-camera-detection-017FMovjdav7L4UL5csDksvo
-      #claude/fix-video-player-fps-01TiquputBPTMgjENMUnrX3N
-      #claude/fix-sc202cs-resolution-01RtttvdEZUBWg8EunW5Toqa
-      #claude/fix-face-detection-camera-01AWfa9AwPyGZ3eKvNFjcgBw
-      #claude/fix-esp-linking-error-01YQWEBHX1b6Kz3NVzoJBWE1
-      #claude/fix-netif-already-added-crash-011CUy5QCMQCT1ML6SGkLk2M #claude/debug-ov5647-red-image-011CV4NTHxKsGGMyPDj9Cudm
-      #claude/fix-netif-already-added-crash-011CUy5QCMQCT1ML6SGkLk2M #claude/fix-camera-fps-resolution-01US8XtXVbsxXyFrAsVqp9qP
+
     components: [sd_mmc_card, webdavbox3, storage, esp_video, esp_cam_sensor, lvgl_camera_display, simple_video_player]
     refresh: always
 
