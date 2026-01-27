@@ -122,15 +122,7 @@ external_components:
   - source: github://pr#11886
     components: [mipi_dsi]
     refresh: always
- 
-
-
-  - source:
-      type: git
-      url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: main #claude/fix-lvgl-watchdog-crash-AGRWh #claude/fix-esp-video-errors-Ln67h  #claude/fix-lvgl-watchdog-crash-AGRWh
-    components: [lvgl, image, font, esp_video, esp_cam_sensor, sd_mmc_card, webdavbox3, storage, lvgl_camera_display, simple_video_player]
-    refresh: always   
+  
 
 psram:
   mode: hex
