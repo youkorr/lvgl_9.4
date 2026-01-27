@@ -324,18 +324,7 @@ lvgl:
 
 ---
 
-## 🐛 Troubleshooting
 
-### Issue: "Unknown widget type: lottie"
-
-**Cause**: LVGL v8 doesn't support Lottie (v9 required)
-
-**Solution**: Verify you're using this component:
-```yaml
-external_components:
-  - source: github://youkorr/test2_esp_video_esphome
-    components: [lvgl]  # ← Must use this, not ESPHome built-in
-```
 
 ### Issue: Compilation fails with "LV_USE_THORVG_INTERNAL undefined"
 
