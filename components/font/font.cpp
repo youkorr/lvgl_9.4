@@ -60,66 +60,21 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
     return nullptr;
   }
 
-  // Calculate expected data size based on original bpp
+  // Calculate expected data size
   uint8_t bpp = fe->get_bpp();
-  int src_stride = (gd->width * bpp + 7) / 8;
-  int src_size = src_stride * gd->height;
+  int stride = (gd->width * bpp + 7) / 8;
+  int data_size = stride * gd->height;
+  ESP_LOGD(TAG, "get_glyph_bitmap: bpp=%d, stride=%d, data_size=%d bytes", bpp, stride, data_size);
 
-  // For A1 format (bpp=1), LVGL 9.x has rendering issues
-  // We need to convert to A8 format (8bpp) for proper rendering
-  bool convert_a1_to_a8 = (bpp == 1);
-
-  if (convert_a1_to_a8) {
-    // A8 format: 1 byte per pixel
-    int a8_stride = gd->width;  // 1 byte per pixel
-    int a8_size = a8_stride * gd->height;
-    ESP_LOGD(TAG, "get_glyph_bitmap: converting A1->A8, src_stride=%d, a8_stride=%d, a8_size=%d", src_stride, a8_stride,
-             a8_size);
-
-    // Determine destination buffer - use draw_buf if available, otherwise use static buffer
-    // Static buffer for when LVGL doesn't provide draw_buf (happens with some render paths)
-    static uint8_t static_a8_buffer[4096];  // 4KB should cover most glyphs (64x64 max)
-    uint8_t *dst = nullptr;
-
-    if (draw_buf != nullptr && draw_buf->data != nullptr) {
-      dst = (uint8_t *) draw_buf->data;
-      ESP_LOGD(TAG, "get_glyph_bitmap: using draw_buf->data for A1->A8 conversion");
-    } else if (a8_size <= (int) sizeof(static_a8_buffer)) {
-      dst = static_a8_buffer;
-      ESP_LOGD(TAG, "get_glyph_bitmap: using static buffer for A1->A8 conversion");
-    } else {
-      ESP_LOGE(TAG, "get_glyph_bitmap: glyph too large for static buffer (%d > %d)", a8_size,
-               (int) sizeof(static_a8_buffer));
-      return gd->data;  // Fallback to original data
-    }
-
-    if (dst != nullptr && gd->data != nullptr) {
-      // Convert 1bpp to 8bpp: each bit becomes 0x00 or 0xFF
-      const uint8_t *src = gd->data;
-
-      for (int y = 0; y < gd->height; y++) {
-        for (int x = 0; x < gd->width; x++) {
-          int src_byte = (y * src_stride) + (x / 8);
-          int src_bit = 7 - (x % 8);  // MSB first
-          uint8_t pixel = (src[src_byte] >> src_bit) & 1;
-          dst[y * a8_stride + x] = pixel ? 0xFF : 0x00;
-        }
-      }
-      ESP_LOGD(TAG, "get_glyph_bitmap: A1->A8 conversion done, returning dst=%p", (void *) dst);
-      return dst;
-    }
-  } else {
-    // For other formats (A2, A4, A8), copy directly
-    ESP_LOGD(TAG, "get_glyph_bitmap: stride=%d, expected_size=%d bytes", src_stride, src_size);
-
-    if (draw_buf != nullptr && draw_buf->data != nullptr && gd->data != nullptr && src_size > 0) {
-      ESP_LOGD(TAG, "get_glyph_bitmap: copying %d bytes to draw_buf->data=%p", src_size, draw_buf->data);
-      memcpy(draw_buf->data, gd->data, src_size);
-      ESP_LOGD(TAG, "get_glyph_bitmap: copy done, returning draw_buf->data");
-      return draw_buf->data;
-    }
+  // If draw_buf is provided, copy the data there
+  if (draw_buf != nullptr && draw_buf->data != nullptr && gd->data != nullptr && data_size > 0) {
+    ESP_LOGD(TAG, "get_glyph_bitmap: copying %d bytes to draw_buf->data=%p", data_size, draw_buf->data);
+    memcpy(draw_buf->data, gd->data, data_size);
+    ESP_LOGD(TAG, "get_glyph_bitmap: copy done, returning draw_buf->data");
+    return draw_buf->data;
   }
 
+  // Return static glyph data pointer
   ESP_LOGD(TAG, "get_glyph_bitmap: returning static data=%p", (void *) gd->data);
   return gd->data;
 }
@@ -166,13 +121,10 @@ bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uin
 
   // LVGL 9.x: Use format field instead of bpp
   // Map bits per pixel to LVGL glyph format
-  // NOTE: For bpp=1, we convert to A8 format in get_glyph_bitmap because LVGL 9.x
-  // has rendering issues with A1 format. So we report A8 here as well.
   uint8_t bpp = fe->get_bpp();
   switch (bpp) {
     case 1:
-      // Convert A1 to A8 to avoid LVGL 9.x A1 rendering crash
-      dsc->format = LV_FONT_GLYPH_FORMAT_A8;
+      dsc->format = LV_FONT_GLYPH_FORMAT_A1;
       break;
     case 2:
       dsc->format = LV_FONT_GLYPH_FORMAT_A2;
@@ -190,12 +142,7 @@ bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uin
   }
 
   // Set stride (bytes per row)
-  // For bpp=1, we convert to A8 format, so stride = width (1 byte per pixel)
-  if (bpp == 1) {
-    dsc->stride = gd->width;  // A8 format: 1 byte per pixel
-  } else {
-    dsc->stride = (gd->width * bpp + 7) / 8;
-  }
+  dsc->stride = (gd->width * bpp + 7) / 8;
 
   // Store the unicode letter in gid for bitmap retrieval
   dsc->gid.index = unicode_letter;
