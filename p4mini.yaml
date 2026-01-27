@@ -246,7 +246,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/youkorr/lvgl_9.4
-      ref: main#claude/fix-esp-video-errors-Ln67h #claude/fix-mjpeg-streaming-seuCV
+      ref: main 
     components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, pedestrian_detection, lvgl, font, image, network_camera]
     refresh: 0s
 
