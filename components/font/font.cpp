@@ -254,6 +254,11 @@ Font::Font(const Glyph *data, int data_nr, int baseline, int height, int descend
   this->lv_font_.fallback = nullptr;
   // Set kerning to 0 (no kerning support)
   this->lv_font_.kerning = 0;
+  // CRITICAL for LVGL 9.x: Set static_bitmap to 1 because our bitmap data is in PROGMEM/flash
+  // If this is 0, LVGL may try to free the bitmap data which causes a crash!
+  this->lv_font_.static_bitmap = 1;
+  // release_glyph callback not needed for static bitmaps
+  this->lv_font_.release_glyph = nullptr;
 #endif
 }
 
