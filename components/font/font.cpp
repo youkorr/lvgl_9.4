@@ -1,5 +1,7 @@
 #include "font.h"
 
+#include <cstring>
+
 #include "esphome/core/color.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -17,11 +19,11 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
     return nullptr;
   }
   if (g_dsc->resolved_font == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_bitmap: resolved_font is null");
+    ESP_LOGE(TAG, "get_glyph_bitmap: resolved_font is null for glyph 0x%08X", g_dsc->gid.index);
     return nullptr;
   }
   if (g_dsc->resolved_font->dsc == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_bitmap: font dsc is null");
+    ESP_LOGE(TAG, "get_glyph_bitmap: font dsc is null for glyph 0x%08X", g_dsc->gid.index);
     return nullptr;
   }
 
@@ -33,8 +35,16 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
 
   const auto *gd = fe->get_glyph_data_(unicode_letter);
   if (gd == nullptr) {
+    ESP_LOGW(TAG, "get_glyph_bitmap: glyph 0x%08X not found", unicode_letter);
     return nullptr;
   }
+
+  // Sanity check glyph data pointer
+  if (gd->data == nullptr && gd->width > 0 && gd->height > 0) {
+    ESP_LOGE(TAG, "get_glyph_bitmap: glyph 0x%08X has null data but non-zero dimensions", unicode_letter);
+    return nullptr;
+  }
+
   return gd->data;
 }
 
@@ -58,6 +68,11 @@ bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uin
   if (gd == nullptr) {
     return false;
   }
+
+  // Initialize all dsc fields to safe defaults first (LVGL 9.x requirement)
+  // This ensures no uninitialized fields cause crashes
+  memset(dsc, 0, sizeof(lv_font_glyph_dsc_t));
+
   dsc->adv_w = gd->advance;
   dsc->ofs_x = gd->offset_x;
   dsc->ofs_y = fe->height_ - gd->height - gd->offset_y - fe->lv_font_.base_line;
@@ -88,7 +103,6 @@ bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uin
   }
 
   // Set stride (bytes per row)
-  // Calculate stride based on width and bpp
   dsc->stride = (gd->width * bpp + 7) / 8;
 
   // Store the unicode letter in gid for bitmap retrieval
