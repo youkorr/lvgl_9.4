@@ -122,7 +122,20 @@ external_components:
   - source: github://pr#11886
     components: [mipi_dsi]
     refresh: always
-  
+    
+  - source:
+      type: git
+      url: https://github.com/youkorr/lvgl_9.4
+      ref: claude/fix-lvgl-alignment-warning-PbjVB
+    components: [lvgl, image, font]
+    refresh: always   
+
+  - source:
+      type: git
+      url: https://github.com/youkorr/test2_esp_video_esphome
+      ref: main   
+    components: [esp_video, esp_cam_sensor, sd_mmc_card, webdavbox3, storage, lvgl_camera_display, simple_video_player]
+    refresh: always   
 
 psram:
   mode: hex
@@ -1782,15 +1795,7 @@ lvgl:
               loop: true
               autoplay: true
 
-          # Lottie - PAS de src ici, chargé dans on_load
-          #- lottie:
-              #id: thunderstorms
-              #x: 100
-              #y: 100
-              #width: 200
-              #height: 200
-              #loop: true
-              #autoplay: true  
+
           - chart:
               id: temp_chart
               x: 400
@@ -1810,15 +1815,7 @@ lvgl:
               series:
                 - id: Temperature
                   color: 0xFF0000  # Red line
-          #- lottie:
-              #id: success_anim
-              #align: CENTER
-              #y: 100
-              #width: 120
-              #height: 120
-              #src: "/sdcard/lotties/thunderstorms-day-extreme-rain.json" 
-              #autoplay: true
-              #loop: true
+
           - calendar:
               id: holiday_calendar
               width: 320
