@@ -217,11 +217,13 @@ async def to_code(configs):
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
     # Memory alignment configuration for LVGL 9.4
-    # LV_DRAW_BUF_ALIGN: Set to minimum (4) to avoid warnings from LVGL's internal
-    # temporary buffers (stack/static) that can't be aligned to higher values.
-    # Our custom lv_malloc_core() always allocates with 64-byte alignment on ESP32
-    # for optimal PSRAM/cache performance, regardless of this setting.
-    df.add_define("LV_DRAW_BUF_ALIGN", "4")
+    # These are the official LVGL defaults. Setting higher values causes warnings
+    # from LVGL's internal stack/static buffers that can't meet stricter alignment.
+    # Our custom lv_malloc_core() always uses 64-byte alignment on ESP32 for
+    # optimal PSRAM/cache performance, regardless of these settings.
+    # See: https://github.com/lvgl/lvgl/blob/master/lv_conf_template.h
+    df.add_define("LV_DRAW_BUF_STRIDE_ALIGN", "1")  # LVGL default
+    df.add_define("LV_DRAW_BUF_ALIGN", "4")  # LVGL default
     df.add_define("LV_USE_STDLIB_MALLOC", "LV_STDLIB_CUSTOM")
 
     # ============================================
