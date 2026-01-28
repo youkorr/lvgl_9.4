@@ -1,7 +1,5 @@
 #include "font.h"
 
-#include <cstring>
-
 #include "esphome/core/color.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -11,266 +9,27 @@ namespace font {
 static const char *const TAG = "font";
 
 #ifdef USE_LVGL_FONT
-// LVGL 9.x compatible implementation
-const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *draw_buf) {
-  ESP_LOGD(TAG, "get_glyph_bitmap: ENTER, draw_buf=%p", (void *) draw_buf);
+static const uint8_t opa4_table[16] = {0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255};
 
-  // Safety checks to prevent crashes from null pointers
-  if (g_dsc == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_bitmap: g_dsc is null");
-    return nullptr;
-  }
+static const uint8_t opa2_table[4] = {0, 85, 170, 255};
 
-  // Log all important fields of g_dsc to debug what LVGL passes to us
-  ESP_LOGD(TAG, "get_glyph_bitmap: g_dsc=%p, gid.index=0x%08X, format=%d, stride=%d", (void *) g_dsc, g_dsc->gid.index,
-           g_dsc->format, g_dsc->stride);
-  ESP_LOGD(TAG, "get_glyph_bitmap: box=%dx%d, ofs=(%d,%d), adv_w=%d", g_dsc->box_w, g_dsc->box_h, g_dsc->ofs_x,
-           g_dsc->ofs_y, g_dsc->adv_w);
+const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *dsc, lv_draw_buf_t *draw_buf) {
+  const auto *font = dsc->resolved_font;
+  auto *const fe = (Font *) font->dsc;
 
-  if (g_dsc->resolved_font == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_bitmap: resolved_font is null for glyph 0x%08X", g_dsc->gid.index);
-    return nullptr;
-  }
-  ESP_LOGD(TAG, "get_glyph_bitmap: resolved_font=%p", (void *) g_dsc->resolved_font);
-
-  if (g_dsc->resolved_font->dsc == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_bitmap: font dsc is null for glyph 0x%08X", g_dsc->gid.index);
-    return nullptr;
-  }
-
-  // Extract the font from the resolved_font field
-  auto *fe = (Font *) g_dsc->resolved_font->dsc;
-  ESP_LOGD(TAG, "get_glyph_bitmap: Font ptr=%p, bpp=%d", (void *) fe, fe->get_bpp());
-
-  // Get the unicode letter from the glyph ID
-  uint32_t unicode_letter = g_dsc->gid.index;
-
-  const auto *gd = fe->get_glyph_data_(unicode_letter);
+  const auto *gd = fe->get_glyph_data_(dsc->gid.index);
+  if (gd == nullptr)
   if (gd == nullptr) {
-    ESP_LOGW(TAG, "get_glyph_bitmap: glyph 0x%08X not found", unicode_letter);
     return nullptr;
   }
 
-  ESP_LOGD(TAG, "get_glyph_bitmap: glyph 0x%04X found, data=%p, w=%d, h=%d", unicode_letter, (void *) gd->data,
-           gd->width, gd->height);
-
-  // Sanity check glyph data pointer
-  if (gd->data == nullptr && gd->width > 0 && gd->height > 0) {
-    ESP_LOGE(TAG, "get_glyph_bitmap: glyph 0x%08X has null data but non-zero dimensions", unicode_letter);
-    return nullptr;
-  }
-
-  // Get source data info
-  uint8_t bpp = fe->get_bpp();
-  int src_stride = (gd->width * bpp + 7) / 8;
-  int src_size = src_stride * gd->height;
-
-  // For A1/A2, we convert to A8 format
-  // A8 stride = width (1 byte per pixel)
-  int dst_stride = (bpp <= 2) ? gd->width : ((bpp == 4) ? (gd->width + 1) / 2 : gd->width);
-  int dst_size = dst_stride * gd->height;
-
-  ESP_LOGD(TAG, "get_glyph_bitmap: bpp=%d, src_size=%d, dst_size=%d bytes", bpp, src_size, dst_size);
-
-  // If draw_buf is provided, copy/convert the data there
-  if (draw_buf != nullptr && draw_buf->data != nullptr && gd->data != nullptr && gd->width > 0 && gd->height > 0) {
-    uint8_t *dst = (uint8_t *) draw_buf->data;
-    const uint8_t *src = gd->data;
-
-    if (bpp == 1) {
-      // ESPHome font format: bits are packed sequentially (bit-stream, no row padding)
-      // This matches the format used in Font::print() function
-      ESP_LOGD(TAG, "get_glyph_bitmap: converting A1->A8 (bit-stream), %dx%d pixels", gd->width, gd->height);
-      uint8_t bitmask = 0;
-      uint8_t byte_data = 0;
-      const uint8_t *src_ptr = src;
-
-      for (int y = 0; y < gd->height; y++) {
-        uint8_t *dst_row = dst + y * dst_stride;
-        for (int x = 0; x < gd->width; x++) {
-          // Read next byte when bitmask is exhausted
-          if (bitmask == 0) {
-            byte_data = progmem_read_byte(src_ptr++);
-            bitmask = 0x80;
-          }
-          // Extract bit and convert to A8 (0x00 or 0xFF)
-          dst_row[x] = (byte_data & bitmask) ? 0xFF : 0x00;
-          bitmask >>= 1;
-        }
-      }
-    } else if (bpp == 2) {
-      // ESPHome font format: 2 bits per pixel, packed sequentially (bit-stream)
-      ESP_LOGD(TAG, "get_glyph_bitmap: converting A2->A8 (bit-stream), %dx%d pixels", gd->width, gd->height);
-      static const uint8_t a2_to_a8[4] = {0x00, 0x55, 0xAA, 0xFF};
-      uint8_t bitmask = 0;
-      uint8_t byte_data = 0;
-      const uint8_t *src_ptr = src;
-
-      for (int y = 0; y < gd->height; y++) {
-        uint8_t *dst_row = dst + y * dst_stride;
-        for (int x = 0; x < gd->width; x++) {
-          uint8_t pixel = 0;
-          // Read 2 bits per pixel
-          for (int bit_num = 0; bit_num < 2; bit_num++) {
-            if (bitmask == 0) {
-              byte_data = progmem_read_byte(src_ptr++);
-              bitmask = 0x80;
-            }
-            pixel <<= 1;
-            if (byte_data & bitmask)
-              pixel |= 1;
-            bitmask >>= 1;
-          }
-          dst_row[x] = a2_to_a8[pixel & 0x03];
-        }
-      }
-    } else if (bpp == 4) {
-      // ESPHome font format: 4 bits per pixel, packed sequentially (bit-stream)
-      // LVGL A4 expects 2 pixels per byte, high nibble first - same as ESPHome
-      ESP_LOGD(TAG, "get_glyph_bitmap: converting A4 (bit-stream), %dx%d pixels", gd->width, gd->height);
-      uint8_t bitmask = 0;
-      uint8_t byte_data = 0;
-      const uint8_t *src_ptr = src;
-
-      // Output buffer for LVGL A4 format: 2 pixels per byte
-      int dst_idx = 0;
-      for (int y = 0; y < gd->height; y++) {
-        for (int x = 0; x < gd->width; x++) {
-          uint8_t pixel = 0;
-          // Read 4 bits per pixel from ESPHome bit-stream
-          for (int bit_num = 0; bit_num < 4; bit_num++) {
-            if (bitmask == 0) {
-              byte_data = progmem_read_byte(src_ptr++);
-              bitmask = 0x80;
-            }
-            pixel <<= 1;
-            if (byte_data & bitmask)
-              pixel |= 1;
-            bitmask >>= 1;
-          }
-          // Pack into LVGL A4 format: high nibble = even pixel, low nibble = odd pixel
-          if ((x % 2) == 0) {
-            dst[dst_idx] = pixel << 4;
-          } else {
-            dst[dst_idx] |= pixel & 0x0F;
-            dst_idx++;
-          }
-        }
-        // If odd width, finish the last byte of this row
-        if (gd->width % 2 != 0) {
-          dst_idx++;
-        }
-      }
-    } else {
-      // A8: ESPHome format packs 8 bits per pixel sequentially
-      ESP_LOGD(TAG, "get_glyph_bitmap: copying A8 (bit-stream), %dx%d pixels", gd->width, gd->height);
-      uint8_t bitmask = 0;
-      uint8_t byte_data = 0;
-      const uint8_t *src_ptr = src;
-
-      for (int y = 0; y < gd->height; y++) {
-        uint8_t *dst_row = dst + y * dst_stride;
-        for (int x = 0; x < gd->width; x++) {
-          uint8_t pixel = 0;
-          // Read 8 bits per pixel
-          for (int bit_num = 0; bit_num < 8; bit_num++) {
-            if (bitmask == 0) {
-              byte_data = progmem_read_byte(src_ptr++);
-              bitmask = 0x80;
-            }
-            pixel <<= 1;
-            if (byte_data & bitmask)
-              pixel |= 1;
-            bitmask >>= 1;
-          }
-          dst_row[x] = pixel;
-        }
-      }
-    }
-
-    ESP_LOGD(TAG, "get_glyph_bitmap: done, returning draw_buf->data");
-    return draw_buf->data;
-  }
-
-  // Fallback: return static glyph data pointer (may not work for A1/A2 on ESP32-P4)
-  ESP_LOGW(TAG, "get_glyph_bitmap: no draw_buf, returning static data=%p (may cause issues)", (void *) gd->data);
-  return gd->data;
-}
-
-bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uint32_t unicode_letter, uint32_t next) {
-  // Safety checks to prevent crashes from null pointers
-  if (font == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_dsc_cb: font is null");
-    return false;
-  }
-  if (font->dsc == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_dsc_cb: font->dsc is null");
-    return false;
-  }
-  if (dsc == nullptr) {
-    ESP_LOGE(TAG, "get_glyph_dsc_cb: dsc is null");
-    return false;
-  }
-
-  auto *fe = (Font *) font->dsc;
-  ESP_LOGD(TAG, "get_glyph_dsc_cb: unicode=0x%04X, font bpp=%d, glyphs=%d", unicode_letter, fe->get_bpp(),
-           (int) fe->glyphs_.size());
-
-  const auto *gd = fe->get_glyph_data_(unicode_letter);
-  if (gd == nullptr) {
-    ESP_LOGW(TAG, "get_glyph_dsc_cb: glyph 0x%04X not found in font", unicode_letter);
-    return false;
-  }
-
-  ESP_LOGD(TAG, "get_glyph_dsc_cb: found glyph 0x%04X, w=%d, h=%d, adv=%d", unicode_letter, gd->width, gd->height,
-           gd->advance);
-
-  // CRITICAL: Zero out the entire structure first to ensure no garbage values
-  // LVGL 9.x has additional internal fields (like 'entry' for caching) that must be NULL/0
-  // The crash at address 0x1c86c371 was caused by uninitialized fields being read by LVGL renderer
-  memset(dsc, 0, sizeof(lv_font_glyph_dsc_t));
-
-  dsc->adv_w = gd->advance;
-  dsc->ofs_x = gd->offset_x;
-  dsc->ofs_y = fe->height_ - gd->height - gd->offset_y - fe->lv_font_.base_line;
+  const uint8_t *bitmap_in = gd->data;
+  uint8_t *bitmap_out_tmp = draw_buf->data;
   dsc->box_w = gd->width;
   dsc->box_h = gd->height;
   dsc->is_placeholder = 0;
-
-  // LVGL 9.x: Use format field instead of bpp
-  // IMPORTANT: Convert A1 and A2 to A8 format for ESP32-P4 compatibility
-  // The A1 renderer has issues on RISC-V architecture, but A8 works correctly
-  uint8_t bpp = fe->get_bpp();
-  switch (bpp) {
-    case 1:
-    case 2:
-      // Convert A1/A2 to A8 for better compatibility on ESP32-P4
-      dsc->format = LV_FONT_GLYPH_FORMAT_A8;
-      dsc->stride = gd->width;  // A8 = 1 byte per pixel
-      break;
-    case 4:
-      dsc->format = LV_FONT_GLYPH_FORMAT_A4;
-      dsc->stride = (gd->width + 1) / 2;  // A4 = 4 bits per pixel
-      break;
-    case 8:
-      dsc->format = LV_FONT_GLYPH_FORMAT_A8;
-      dsc->stride = gd->width;  // A8 = 1 byte per pixel
-      break;
-    default:
-      dsc->format = LV_FONT_GLYPH_FORMAT_A8;
-      dsc->stride = gd->width;
-      break;
-  }
-
-  // Store the unicode letter in gid for bitmap retrieval
+  dsc->format = (lv_font_glyph_format_t) fe->get_bpp();
   dsc->gid.index = unicode_letter;
-
-  // Set resolved_font to allow bitmap callback to access the font
-  dsc->resolved_font = font;
-
-  ESP_LOGD(TAG, "get_glyph_dsc_cb: completed - format=%d, stride=%d, box=%dx%d, ofs=(%d,%d)", (int) dsc->format,
-           dsc->stride, dsc->box_w, dsc->box_h, dsc->ofs_x, dsc->ofs_y);
-
   return true;
 }
 
@@ -399,16 +158,7 @@ Font::Font(const Glyph *data, int data_nr, int baseline, int height, int descend
       xheight_(xheight),
       capheight_(capheight),
       bpp_(bpp) {
-  ESP_LOGI(TAG, "Font created: glyphs=%d, height=%d, baseline=%d, bpp=%d", data_nr, height, baseline, bpp);
 #ifdef USE_LVGL_FONT
-  ESP_LOGI(TAG, "LVGL font init: line_height=%d, base_line=%d", this->get_height(),
-           this->get_height() - this->get_baseline());
-
-  // CRITICAL: Zero the entire lv_font_t structure first to ensure NO garbage values
-  // LVGL 9.x may have additional fields (user_data, etc.) that could cause crashes if uninitialized
-  memset(&this->lv_font_, 0, sizeof(lv_font_t));
-
-  // Now set all required fields
   this->lv_font_.dsc = this;
   this->lv_font_.line_height = this->get_height();
   this->lv_font_.base_line = this->lv_font_.line_height - this->get_baseline();
@@ -417,28 +167,10 @@ Font::Font(const Glyph *data, int data_nr, int baseline, int height, int descend
   this->lv_font_.subpx = LV_FONT_SUBPX_NONE;
   this->lv_font_.underline_position = -1;
   this->lv_font_.underline_thickness = 1;
-  // Explicitly set fallback to nullptr to prevent LVGL from following invalid pointer
-  this->lv_font_.fallback = nullptr;
-  // Set kerning to 0 (no kerning support)
-  this->lv_font_.kerning = 0;
-  // CRITICAL for LVGL 9.x: Set static_bitmap to 0 to force LVGL to provide a draw_buf
-  // When static_bitmap=1, LVGL doesn't provide draw_buf for A1 format and expects static data
-  // But returning static pointers doesn't work on ESP32-P4 (RISC-V), so we need draw_buf
-  this->lv_font_.static_bitmap = 0;
-  // release_glyph callback not needed for static bitmaps
-  this->lv_font_.release_glyph = nullptr;
-  // user_data must be nullptr for LVGL 9.x
-  this->lv_font_.user_data = nullptr;
-#else
-  ESP_LOGW(TAG, "USE_LVGL_FONT not defined - LVGL font callbacks not initialized!");
 #endif
 }
 
 const Glyph *Font::find_glyph(uint32_t codepoint) const {
-  // Safety check: return nullptr if no glyphs are available
-  if (this->glyphs_.empty()) {
-    return nullptr;
-  }
   int lo = 0;
   int hi = this->glyphs_.size() - 1;
   while (lo != hi) {
