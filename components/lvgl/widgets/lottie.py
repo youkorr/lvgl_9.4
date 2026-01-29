@@ -12,13 +12,24 @@ Requirements:
 - LV_USE_VECTOR_GRAPHIC must be enabled
 
 Usage in ESPHome YAML:
+
+    Method 1 - File on filesystem (SD card, LittleFS):
     - lottie:
         id: my_animation
         width: 200
         height: 200
-        src: "/animation.json"      # File path on filesystem
-        loop: true                  # Optional, default true
-        auto_start: true            # Optional, default true
+        src: "/sdcard/animation.json"   # File path on ESP32 filesystem
+        loop: true
+        auto_start: true
+
+    Method 2 - Embedded in firmware:
+    - lottie:
+        id: my_animation
+        width: 200
+        height: 200
+        file: "animations/loading.json"  # Local file, embedded in firmware
+        loop: true
+        auto_start: true
 
 Actions:
     - lvgl.lottie.start: my_animation
@@ -26,8 +37,11 @@ Actions:
     - lvgl.lottie.pause: my_animation
 """
 
+from pathlib import Path
+
 from esphome import automation, codegen as cg, config_validation as cv
-from esphome.const import CONF_HEIGHT, CONF_ID, CONF_WIDTH
+from esphome.const import CONF_FILE, CONF_HEIGHT, CONF_ID, CONF_RAW_DATA_ID, CONF_WIDTH
+from esphome.core import CORE
 
 from ..automation import action_to_code
 from ..defines import CONF_AUTO_START, CONF_MAIN, CONF_SRC, literal
@@ -44,24 +58,50 @@ lv_lottie_t = LvType("lv_lottie_t")
 
 
 def lottie_path_validator(value):
-    """Validate Lottie source file path."""
+    """Validate Lottie source file path (on ESP32 filesystem)."""
     value = cv.string(value)
     if not value.startswith("/"):
         raise cv.Invalid(
-            f"Lottie source must be a file path starting with '/', got: {value}"
+            f"Lottie src must be a file path starting with '/', got: {value}"
         )
     return value
 
 
-LOTTIE_SCHEMA = cv.Schema(
+def lottie_file_validator(value):
+    """Validate and resolve local Lottie file path (to embed in firmware)."""
+    value = cv.string(value)
+    # Resolve relative to config directory
+    path = CORE.relative_config_path(value)
+    if not Path(path).is_file():
+        raise cv.Invalid(f"Lottie file not found: {path}")
+    return str(path)
+
+
+def validate_lottie_source(config):
+    """Ensure exactly one of src or file is specified."""
+    has_src = CONF_SRC in config
+    has_file = CONF_FILE in config
+
+    if has_src and has_file:
+        raise cv.Invalid("Cannot specify both 'src' and 'file'. Use 'src' for filesystem path or 'file' for embedded.")
+    if not has_src and not has_file:
+        raise cv.Invalid("Must specify either 'src' (filesystem path) or 'file' (embedded in firmware).")
+    return config
+
+
+LOTTIE_BASE_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_WIDTH): size,
         cv.Required(CONF_HEIGHT): size,
-        cv.Required(CONF_SRC): lottie_path_validator,
+        cv.Optional(CONF_SRC): lottie_path_validator,
+        cv.Optional(CONF_FILE): lottie_file_validator,
         cv.Optional(CONF_LOOP, default=True): cv.boolean,
         cv.Optional(CONF_AUTO_START, default=True): cv.boolean,
+        cv.GenerateID(CONF_RAW_DATA_ID): cv.declare_id(cg.uint8),
     }
 )
+
+LOTTIE_SCHEMA = cv.All(LOTTIE_BASE_SCHEMA, validate_lottie_source)
 
 LOTTIE_MODIFY_SCHEMA = cv.Schema(
     {
@@ -100,9 +140,22 @@ class LottieType(WidgetType):
         # Set buffer for Lottie rendering
         lv.lottie_set_buffer(w.obj, width, height, lottie_buffer)
 
-        # Load animation from file
+        # Load animation - Method 1: From filesystem
         if src := config.get(CONF_SRC):
             lv.lottie_set_src_file(w.obj, src)
+
+        # Load animation - Method 2: From embedded data
+        elif file_path := config.get(CONF_FILE):
+            # Read the JSON file content
+            with open(file_path, "rb") as f:
+                json_data = f.read()
+
+            # Create progmem array with the JSON data
+            raw_data_id = config[CONF_RAW_DATA_ID]
+            prog_arr = cg.progmem_array(raw_data_id, list(json_data))
+
+            # Use lv_lottie_set_src_data to load from memory
+            lv.lottie_set_src_data(w.obj, prog_arr, len(json_data))
 
         # Set looping (requires accessing the internal animation)
         # Note: In LVGL 9.4, use lv_lottie_get_anim() to get animation handle
