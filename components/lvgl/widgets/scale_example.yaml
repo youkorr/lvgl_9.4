@@ -971,7 +971,7 @@ lvgl:
           bg_color: 0x000000
           widgets:
             # ===== SPEEDOMETER (Left Side) =====
-            # Animated spinner around speedometer (follows 270° gauge arc)
+            # Animated spinner around speedometer
             - spinner:
                 id: nfs_speed_spinner
                 x: 20
@@ -980,7 +980,6 @@ lvgl:
                 height: 280
                 arc_length: 90
                 spin_time: 2s
-                rotation: 135
                 main:
                   arc_width: 6
                   arc_color: 0x001a1a
@@ -1074,7 +1073,7 @@ lvgl:
                 text_font: montserrat_14
 
             # ===== TACHOMETER (Right Side) =====
-            # Animated spinner around tachometer (follows 270° gauge arc)
+            # Animated spinner around tachometer
             - spinner:
                 id: nfs_rpm_spinner
                 x: 320
@@ -1083,7 +1082,6 @@ lvgl:
                 height: 280
                 arc_length: 90
                 spin_time: 1.5s
-                rotation: 135
                 main:
                   arc_width: 6
                   arc_color: 0x001a1a
