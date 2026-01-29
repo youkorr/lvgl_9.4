@@ -1,0 +1,555 @@
+# =============================================================================
+# NEED FOR SPEED Racing Dashboard - 1024x600 Display
+# =============================================================================
+# Complete animated racing dashboard with:
+# - Speedometer (0-320 km/h) with neon glow
+# - Tachometer (0-9000 RPM) with redline
+# - Gear indicator
+# - Realistic racing simulation
+# =============================================================================
+
+globals:
+  # Racing Dashboard Variables
+  - id: nfs_speed
+    type: int
+    initial_value: "0"
+  - id: nfs_rpm
+    type: int
+    initial_value: "800"
+  - id: nfs_gear
+    type: int
+    initial_value: "1"
+  - id: nfs_accelerating
+    type: bool
+    initial_value: "true"
+
+# =============================================================================
+# RACING ANIMATION - Realistic car simulation
+# =============================================================================
+interval:
+  - interval: 30ms
+    then:
+      - lambda: |-
+          // Realistic racing car acceleration/deceleration
+          if (id(nfs_accelerating)) {
+            // Accelerating - RPM builds up
+            id(nfs_rpm) += 80 + (rand() % 40);
+
+            // Shift up when hitting redline (8500 RPM)
+            if (id(nfs_rpm) >= 8500) {
+              if (id(nfs_gear) < 6) {
+                id(nfs_gear)++;
+                id(nfs_rpm) = 4500 + (rand() % 500);  // RPM drops after shift
+              } else {
+                // Top gear - maintain high RPM
+                id(nfs_rpm) = 7500 + (rand() % 1000);
+              }
+            }
+
+            // Speed increases based on gear and RPM
+            int speed_increase = (id(nfs_rpm) / 1500) * id(nfs_gear) / 3;
+            id(nfs_speed) += speed_increase;
+            if (id(nfs_speed) > 320) id(nfs_speed) = 320;
+
+            // Random braking events (simulates corners)
+            if (id(nfs_speed) > 280 && (rand() % 100) < 3) {
+              id(nfs_accelerating) = false;
+            }
+          } else {
+            // Braking/Decelerating
+            id(nfs_rpm) -= 150;
+            id(nfs_speed) -= 8;
+
+            // Downshift when RPM drops
+            if (id(nfs_rpm) < 2500 && id(nfs_gear) > 1) {
+              id(nfs_gear)--;
+              id(nfs_rpm) = 5500;
+            }
+
+            // Minimum values
+            if (id(nfs_rpm) < 800) id(nfs_rpm) = 800;
+            if (id(nfs_speed) < 0) {
+              id(nfs_speed) = 0;
+              id(nfs_accelerating) = true;
+              id(nfs_gear) = 1;
+            }
+
+            // Resume acceleration after braking
+            if (id(nfs_speed) < 80 && (rand() % 100) < 10) {
+              id(nfs_accelerating) = true;
+            }
+          }
+
+      # Update Speedometer
+      - lvgl.arc.update:
+          id: nfs_speed_arc
+          value: !lambda 'return id(nfs_speed);'
+      - lvgl.label.update:
+          id: nfs_speed_label
+          text:
+            format: "%d"
+            args: [id(nfs_speed)]
+
+      # Update Tachometer
+      - lvgl.arc.update:
+          id: nfs_rpm_arc
+          value: !lambda 'return id(nfs_rpm);'
+      - lvgl.label.update:
+          id: nfs_rpm_label
+          text:
+            format: "%d"
+            args: [id(nfs_rpm)]
+
+      # Update Gear
+      - lvgl.label.update:
+          id: nfs_gear_label
+          text:
+            format: "%d"
+            args: [id(nfs_gear)]
+
+      # Speed arc color based on speed
+      - if:
+          condition:
+            lambda: 'return id(nfs_speed) >= 260;'
+          then:
+            - lvgl.widget.update:
+                id: nfs_speed_arc
+                indicator:
+                  arc_color: 0xFF0000
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(nfs_speed) >= 180;'
+                then:
+                  - lvgl.widget.update:
+                      id: nfs_speed_arc
+                      indicator:
+                        arc_color: 0xFF6600
+                else:
+                  - lvgl.widget.update:
+                      id: nfs_speed_arc
+                      indicator:
+                        arc_color: 0x00FFFF
+
+      # RPM arc color - redline effect
+      - if:
+          condition:
+            lambda: 'return id(nfs_rpm) >= 7500;'
+          then:
+            - lvgl.widget.update:
+                id: nfs_rpm_arc
+                indicator:
+                  arc_color: 0xFF0000
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(nfs_rpm) >= 6000;'
+                then:
+                  - lvgl.widget.update:
+                      id: nfs_rpm_arc
+                      indicator:
+                        arc_color: 0xFF6600
+                else:
+                  - lvgl.widget.update:
+                      id: nfs_rpm_arc
+                      indicator:
+                        arc_color: 0x00FFFF
+
+      # Gear color based on RPM
+      - if:
+          condition:
+            lambda: 'return id(nfs_rpm) >= 7500;'
+          then:
+            - lvgl.widget.update:
+                id: nfs_gear_label
+                text_color: 0xFF0000
+          else:
+            - lvgl.widget.update:
+                id: nfs_gear_label
+                text_color: 0x00FF00
+
+# =============================================================================
+# LVGL CONFIGURATION - 1024x600 Display
+# =============================================================================
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: nfs_dashboard
+          bg_color: 0x000000
+          widgets:
+            # =================================================================
+            # SPEEDOMETER (Left Side) - Position: x=80, centered at y=220
+            # =================================================================
+
+            # Outer decorative ring
+            - arc:
+                id: speed_outer_ring
+                x: 60
+                y: 40
+                width: 360
+                height: 360
+                min_value: 0
+                max_value: 100
+                value: 100
+                rotation: 135
+                bg_start_angle: 0
+                bg_end_angle: 270
+                mode: NORMAL
+                arc_width: 3
+                indicator:
+                  arc_color: 0x00FFFF
+                  arc_width: 3
+                  arc_opa: 30%
+                bg_arc_color: 0x001a1a
+
+            # Speed Scale with ticks and labels
+            - scale:
+                id: nfs_speed_scale
+                x: 75
+                y: 55
+                width: 330
+                height: 330
+                mode: ROUND_OUTER
+                min_value: 0
+                max_value: 320
+                rotation: 135
+                angle_range: 270
+                ticks:
+                  count: 33
+                  width: 2
+                  length: 10
+                  color: 0x333333
+                  major:
+                    stride: 4
+                    width: 3
+                    length: 22
+                    color: 0x00FFFF
+                    label_show: true
+                    label_gap: 18
+                sections:
+                  - id: speed_zone_normal
+                    range_from: 0
+                    range_to: 180
+                    color: 0x00FFFF
+                    width: 4
+                  - id: speed_zone_fast
+                    range_from: 180
+                    range_to: 260
+                    color: 0xFF6600
+                    width: 4
+                  - id: speed_zone_max
+                    range_from: 260
+                    range_to: 320
+                    color: 0xFF0000
+                    width: 5
+
+            # Speed Arc indicator (animated)
+            - arc:
+                id: nfs_speed_arc
+                x: 110
+                y: 90
+                width: 260
+                height: 260
+                min_value: 0
+                max_value: 320
+                value: 0
+                rotation: 135
+                bg_start_angle: 0
+                bg_end_angle: 270
+                mode: NORMAL
+                arc_width: 30
+                indicator:
+                  arc_color: 0x00FFFF
+                  arc_width: 30
+                  arc_opa: 85%
+                bg_arc_color: 0x0a0a0a
+
+            # Digital Speed Display
+            - label:
+                id: nfs_speed_label
+                x: 140
+                y: 185
+                width: 200
+                text_align: CENTER
+                text: "0"
+                text_color: 0x00FFFF
+                text_font: montserrat_48
+
+            - label:
+                x: 140
+                y: 250
+                width: 200
+                text_align: CENTER
+                text: "KM/H"
+                text_color: 0x00FFFF
+                text_font: montserrat_18
+
+            # =================================================================
+            # TACHOMETER (Right Side) - Position: x=584, centered at y=220
+            # =================================================================
+
+            # Outer decorative ring
+            - arc:
+                id: rpm_outer_ring
+                x: 604
+                y: 40
+                width: 360
+                height: 360
+                min_value: 0
+                max_value: 100
+                value: 100
+                rotation: 135
+                bg_start_angle: 0
+                bg_end_angle: 270
+                mode: NORMAL
+                arc_width: 3
+                indicator:
+                  arc_color: 0x00FFFF
+                  arc_width: 3
+                  arc_opa: 30%
+                bg_arc_color: 0x001a1a
+
+            # RPM Scale with ticks and labels
+            - scale:
+                id: nfs_rpm_scale
+                x: 619
+                y: 55
+                width: 330
+                height: 330
+                mode: ROUND_OUTER
+                min_value: 0
+                max_value: 9
+                rotation: 135
+                angle_range: 270
+                ticks:
+                  count: 46
+                  width: 2
+                  length: 8
+                  color: 0x333333
+                  major:
+                    stride: 5
+                    width: 3
+                    length: 20
+                    color: 0x00FFFF
+                    label_show: true
+                    label_gap: 15
+                sections:
+                  - id: rpm_zone_normal
+                    range_from: 0
+                    range_to: 6
+                    color: 0x00FFFF
+                    width: 4
+                  - id: rpm_zone_high
+                    range_from: 6
+                    range_to: 7.5
+                    color: 0xFF6600
+                    width: 4
+                  - id: rpm_zone_redline
+                    range_from: 7.5
+                    range_to: 9
+                    color: 0xFF0000
+                    width: 5
+
+            # RPM Arc indicator (animated)
+            - arc:
+                id: nfs_rpm_arc
+                x: 654
+                y: 90
+                width: 260
+                height: 260
+                min_value: 0
+                max_value: 9000
+                value: 800
+                rotation: 135
+                bg_start_angle: 0
+                bg_end_angle: 270
+                mode: NORMAL
+                arc_width: 30
+                indicator:
+                  arc_color: 0x00FFFF
+                  arc_width: 30
+                  arc_opa: 85%
+                bg_arc_color: 0x0a0a0a
+
+            # Digital RPM Display
+            - label:
+                id: nfs_rpm_label
+                x: 684
+                y: 185
+                width: 200
+                text_align: CENTER
+                text: "800"
+                text_color: 0x00FFFF
+                text_font: montserrat_48
+
+            - label:
+                x: 684
+                y: 250
+                width: 200
+                text_align: CENTER
+                text: "RPM x1000"
+                text_color: 0x00FFFF
+                text_font: montserrat_14
+
+            # =================================================================
+            # GEAR INDICATOR (Center)
+            # =================================================================
+            - obj:
+                x: 462
+                y: 180
+                width: 100
+                height: 100
+                bg_color: 0x000000
+                border_width: 4
+                border_color: 0x00FFFF
+                radius: 15
+                widgets:
+                  - label:
+                      id: nfs_gear_label
+                      align: CENTER
+                      text: "1"
+                      text_color: 0x00FF00
+                      text_font: montserrat_48
+
+            - label:
+                x: 462
+                y: 285
+                width: 100
+                text_align: CENTER
+                text: "GEAR"
+                text_color: 0x808080
+                text_font: montserrat_14
+
+            # =================================================================
+            # TITLE AND STATUS
+            # =================================================================
+            - label:
+                x: 362
+                y: 420
+                width: 300
+                text_align: CENTER
+                text: "NEED FOR SPEED"
+                text_color: 0xFF6600
+                text_font: montserrat_28
+
+            - label:
+                x: 362
+                y: 460
+                width: 300
+                text_align: CENTER
+                text: "RACING DASHBOARD"
+                text_color: 0x00FFFF
+                text_font: montserrat_18
+
+            # =================================================================
+            # STATUS INDICATORS (Bottom corners)
+            # =================================================================
+            # N2O Indicator (Left)
+            - obj:
+                x: 80
+                y: 430
+                width: 140
+                height: 45
+                bg_color: 0x001a1a
+                border_width: 2
+                border_color: 0x00FFFF
+                radius: 8
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "N2O READY"
+                      text_color: 0x00FF00
+                      text_font: montserrat_16
+
+            # Turbo Indicator (Right)
+            - obj:
+                x: 804
+                y: 430
+                width: 140
+                height: 45
+                bg_color: 0x001a1a
+                border_width: 2
+                border_color: 0x00FFFF
+                radius: 8
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "TURBO"
+                      text_color: 0xFF6600
+                      text_font: montserrat_16
+
+            # =================================================================
+            # DECORATIVE ELEMENTS
+            # =================================================================
+            # Top line
+            - obj:
+                x: 100
+                y: 15
+                width: 824
+                height: 2
+                bg_color: 0x00FFFF
+                bg_opa: 30%
+
+            # Bottom line
+            - obj:
+                x: 100
+                y: 520
+                width: 824
+                height: 2
+                bg_color: 0x00FFFF
+                bg_opa: 30%
+
+            # Center vertical separator (subtle)
+            - obj:
+                x: 510
+                y: 50
+                width: 2
+                height: 100
+                bg_color: 0x00FFFF
+                bg_opa: 20%
+
+            # Speed label
+            - label:
+                x: 175
+                y: 15
+                text: "SPEED"
+                text_color: 0x00FFFF
+                text_font: montserrat_14
+
+            # RPM label
+            - label:
+                x: 750
+                y: 15
+                text: "TACHOMETER"
+                text_color: 0x00FFFF
+                text_font: montserrat_14
+
+# =============================================================================
+# HOW TO USE THIS DASHBOARD
+# =============================================================================
+# 1. Include this file in your main ESPHome config:
+#    packages:
+#      nfs_dashboard: !include nfs_dashboard_1024x600.yaml
+#
+# 2. Or copy the relevant sections to your existing config
+#
+# 3. The dashboard will auto-animate showing a racing simulation
+#
+# 4. To connect to real data (e.g., OBD2), replace the interval animation
+#    with sensor updates:
+#
+#    sensor:
+#      - platform: your_obd2_platform
+#        id: car_speed
+#        on_value:
+#          then:
+#            - lvgl.arc.update:
+#                id: nfs_speed_arc
+#                value: !lambda 'return (int)x;'
+#            - lvgl.label.update:
+#                id: nfs_speed_label
+#                text:
+#                  format: "%d"
+#                  args: [int(x)]
+# =============================================================================
