@@ -1,0 +1,376 @@
+# ESPHome LVGL Dual Microphone Test Example
+# =============================================================================
+# Inspired by M5Stack dual mic test interface
+# Features:
+#   - Two real-time audio waveform charts (Left & Right microphone)
+#   - Record button with state indication (REC/PLAY/READY)
+#   - Spinner animation during recording/playback
+# =============================================================================
+
+globals:
+  # Microphone test state: 0=IDLE, 1=RECORDING, 2=PLAYING
+  - id: mic_test_state
+    type: int
+    initial_value: "0"
+  # Recording timer
+  - id: rec_timer
+    type: int
+    initial_value: "0"
+  # Simulated audio data for demo
+  - id: audio_sample_left
+    type: int
+    initial_value: "0"
+  - id: audio_sample_right
+    type: int
+    initial_value: "0"
+
+# =============================================================================
+# I2S MICROPHONE CONFIGURATION (Example for ESP32-S3)
+# =============================================================================
+# Uncomment and configure for your hardware:
+#
+# i2s_audio:
+#   - id: i2s_mic
+#     i2s_lrclk_pin: GPIO5
+#     i2s_bclk_pin: GPIO6
+#
+# microphone:
+#   - platform: i2s_audio
+#     id: mic_left
+#     adc_type: external
+#     i2s_din_pin: GPIO4
+#     pdm: false
+#     channel: left
+#     bits_per_sample: 16bit
+#     sample_rate: 48000
+#
+#   - platform: i2s_audio
+#     id: mic_right
+#     adc_type: external
+#     i2s_din_pin: GPIO4
+#     pdm: false
+#     channel: right
+#     bits_per_sample: 16bit
+#     sample_rate: 48000
+
+# =============================================================================
+# SIMULATED AUDIO DATA (Demo without real microphones)
+# =============================================================================
+interval:
+  # Fast update for waveform display (4ms = ~250Hz refresh)
+  - interval: 4ms
+    then:
+      - lambda: |-
+          // Simulate audio waveform data
+          static float phase_left = 0;
+          static float phase_right = 0;
+
+          if (id(mic_test_state) == 1) {
+            // Recording - show microphone input simulation
+            // Mix of frequencies to simulate voice
+            float noise = (rand() % 8000) - 4000;
+            id(audio_sample_left) = (int)(sin(phase_left) * 15000 +
+                                          sin(phase_left * 2.3) * 8000 +
+                                          noise);
+            id(audio_sample_right) = (int)(sin(phase_right) * 14000 +
+                                           sin(phase_right * 1.7) * 9000 +
+                                           noise * 0.8);
+            phase_left += 0.15;
+            phase_right += 0.12;
+          } else if (id(mic_test_state) == 2) {
+            // Playing - show playback waveform
+            id(audio_sample_left) = (int)(sin(phase_left) * 20000);
+            id(audio_sample_right) = (int)(sin(phase_right) * 20000);
+            phase_left += 0.08;
+            phase_right += 0.08;
+          } else {
+            // Idle - flat line with small noise
+            id(audio_sample_left) = (rand() % 500) - 250;
+            id(audio_sample_right) = (rand() % 500) - 250;
+          }
+      # Update charts with new audio samples
+      - lvgl.chart.set_next_value:
+          id: chart_mic_left
+          series_index: 0
+          value: !lambda 'return id(audio_sample_left);'
+      - lvgl.chart.set_next_value:
+          id: chart_mic_right
+          series_index: 0
+          value: !lambda 'return id(audio_sample_right);'
+
+  # Recording state machine (100ms tick)
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (id(mic_test_state) == 1) {
+            // Recording state
+            id(rec_timer)++;
+            if (id(rec_timer) >= 30) {  // 3 seconds
+              id(mic_test_state) = 2;  // Switch to playing
+              id(rec_timer) = 0;
+            }
+          } else if (id(mic_test_state) == 2) {
+            // Playing state
+            id(rec_timer)++;
+            if (id(rec_timer) >= 30) {  // 3 seconds
+              id(mic_test_state) = 0;  // Back to idle
+              id(rec_timer) = 0;
+            }
+          }
+      # Update button appearance based on state
+      - if:
+          condition:
+            lambda: 'return id(mic_test_state) == 1;'
+          then:
+            - lvgl.widget.update:
+                id: rec_btn
+                bg_color: 0xE17822
+            - lvgl.label.update:
+                id: rec_btn_label
+                text: "REC"
+            - lvgl.widget.update:
+                id: rec_spinner
+                hidden: false
+            - lvgl.widget.update:
+                id: rec_spinner
+                indicator:
+                  arc_color: 0xE17822
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(mic_test_state) == 2;'
+                then:
+                  - lvgl.widget.update:
+                      id: rec_btn
+                      bg_color: 0x32CC72
+                  - lvgl.label.update:
+                      id: rec_btn_label
+                      text: "PLAY"
+                  - lvgl.widget.update:
+                      id: rec_spinner
+                      hidden: false
+                  - lvgl.widget.update:
+                      id: rec_spinner
+                      indicator:
+                        arc_color: 0x32CC72
+                else:
+                  - lvgl.widget.update:
+                      id: rec_btn
+                      bg_color: 0xD04848
+                  - lvgl.label.update:
+                      id: rec_btn_label
+                      text: "REC\n  3S"
+                  - lvgl.widget.update:
+                      id: rec_spinner
+                      hidden: true
+
+# =============================================================================
+# LVGL CONFIGURATION
+# =============================================================================
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: dual_mic_page
+          bg_color: 0x1a1a1a
+          widgets:
+            # Title
+            - label:
+                align: TOP_MID
+                y: 15
+                text: "Dual Microphone Test"
+                text_color: 0xFFFFFF
+                text_font: montserrat_20
+
+            # Container for the mic test window
+            - obj:
+                id: mic_window
+                align: CENTER
+                width: 670
+                height: 171
+                bg_color: 0x2a2a2a
+                radius: 20
+                border_width: 2
+                border_color: 0x404040
+                widgets:
+                  # ===== LEFT MICROPHONE CHART =====
+                  - label:
+                      x: 15
+                      y: 8
+                      text: "MIC-L"
+                      text_color: 0x40FFA1
+                      text_font: montserrat_12
+
+                  - chart:
+                      id: chart_mic_left
+                      x: 15
+                      y: 25
+                      width: 243
+                      height: 120
+                      bg_color: 0x383838
+                      radius: 12
+                      border_width: 0
+                      type: LINE
+                      point_count: 128
+                      update_mode: SHIFT
+                      y_axis:
+                        id: axis_left_y
+                        major_len: 0
+                        minor_len: 0
+                        min: -32768
+                        max: 32767
+                      x_axis:
+                        id: axis_left_x
+                        major_len: 0
+                        minor_len: 0
+                      series:
+                        - id: series_mic_left
+                          color: 0x40FFA1
+                          axis: PRIMARY_Y
+                          hidden: false
+                      items:
+                        bg_opa: TRANSP
+                      indicator:
+                        width: 0
+                        height: 0
+
+                  # ===== RIGHT MICROPHONE CHART =====
+                  - label:
+                      x: 412
+                      y: 8
+                      text: "MIC-R"
+                      text_color: 0x40FFA1
+                      text_font: montserrat_12
+
+                  - chart:
+                      id: chart_mic_right
+                      x: 412
+                      y: 25
+                      width: 243
+                      height: 120
+                      bg_color: 0x383838
+                      radius: 12
+                      border_width: 0
+                      type: LINE
+                      point_count: 128
+                      update_mode: SHIFT
+                      y_axis:
+                        id: axis_right_y
+                        major_len: 0
+                        minor_len: 0
+                        min: -32768
+                        max: 32767
+                      x_axis:
+                        id: axis_right_x
+                        major_len: 0
+                        minor_len: 0
+                      series:
+                        - id: series_mic_right
+                          color: 0x40FFA1
+                          axis: PRIMARY_Y
+                          hidden: false
+                      items:
+                        bg_opa: TRANSP
+                      indicator:
+                        width: 0
+                        height: 0
+
+                  # ===== RECORD BUTTON (Center) =====
+                  - obj:
+                      id: rec_btn
+                      align: CENTER
+                      x: 67
+                      width: 72
+                      height: 72
+                      radius: 36
+                      bg_color: 0xD04848
+                      border_width: 4
+                      border_color: 0x383838
+                      clickable: true
+                      on_click:
+                        then:
+                          - lambda: |-
+                              if (id(mic_test_state) == 0) {
+                                id(mic_test_state) = 1;
+                                id(rec_timer) = 0;
+                              }
+                      widgets:
+                        - label:
+                            id: rec_btn_label
+                            align: CENTER
+                            text: "REC\n  3S"
+                            text_color: 0xF4F3F3
+                            text_font: montserrat_16
+                            text_align: CENTER
+
+                  # ===== SPINNER (Around record button) =====
+                  - spinner:
+                      id: rec_spinner
+                      align: CENTER
+                      x: 67
+                      width: 80
+                      height: 80
+                      hidden: true
+                      arc_length: 60
+                      spin_time: 1s
+                      main:
+                        arc_width: 3
+                        arc_color: 0x383838
+                      indicator:
+                        arc_width: 3
+                        arc_color: 0xE17822
+
+            # Instructions
+            - label:
+                align: BOTTOM_MID
+                y: -20
+                text: "Tap REC to start 3-second recording test"
+                text_color: 0x808080
+                text_font: montserrat_14
+
+# =============================================================================
+# REAL MICROPHONE INTEGRATION (Example)
+# =============================================================================
+# To use with real I2S microphones, replace the simulated data interval with:
+#
+# interval:
+#   - interval: 4ms
+#     then:
+#       - lambda: |-
+#           // Read actual microphone data
+#           int16_t left_sample, right_sample;
+#           // Your I2S read code here
+#           id(audio_sample_left) = left_sample;
+#           id(audio_sample_right) = right_sample;
+#       - lvgl.chart.set_next_value:
+#           id: chart_mic_left
+#           series_index: 0
+#           value: !lambda 'return id(audio_sample_left);'
+#       - lvgl.chart.set_next_value:
+#           id: chart_mic_right
+#           series_index: 0
+#           value: !lambda 'return id(audio_sample_right);'
+#
+# =============================================================================
+# TROUBLESHOOTING
+# =============================================================================
+#
+# Chart not updating:
+#   - Ensure interval is fast enough (4ms recommended)
+#   - Check that series_index matches your series (0 for first series)
+#   - Verify point_count is reasonable (128-512)
+#
+# Waveform looks wrong:
+#   - Adjust y_axis min/max to match your audio bit depth
+#   - For 16-bit audio: min=-32768, max=32767
+#   - For 8-bit audio: min=0, max=255
+#
+# Button not responding:
+#   - Check clickable: true is set
+#   - Verify state machine logic
+#
+# Spinner not visible:
+#   - Check hidden: false when active
+#   - Ensure arc_width > 0
+#   - Verify colors are visible against background
+#
