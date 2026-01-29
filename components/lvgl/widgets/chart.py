@@ -52,7 +52,13 @@ CONF_AXIS_SECONDARY_X = "axis_secondary_x"
 CONF_UPDATE_MODE = "update_mode"
 CONF_COLOR = "color"
 
-lv_chart_t = LvType("lv_chart_t")
+# Chart type with on_value support for pressed point detection
+lv_chart_t = LvType(
+    "lv_chart_t",
+    largs=[(cg.int32, "point_index")],
+    lvalue=lambda w: lv_expr.chart_get_pressed_point(w.obj),
+    has_on_value=True,
+)
 # Chart series type - use pointer type since lv_chart_series_t is forward-declared in LVGL
 lv_chart_series_t_ptr = cg.global_ns.struct("lv_chart_series_t").operator("ptr")
 
@@ -384,3 +390,32 @@ async def chart_set_value_by_id2(config, action_id, template_arg, args):
         lv.chart_refresh(w.obj)
 
     return await action_to_code(widgets, do_set_value2, action_id, template_arg, args)
+
+
+# Schema for set_series_color action (for dynamic bar recoloring)
+CONF_SERIES_COLOR = "series_color"
+CHART_SET_SERIES_COLOR_SCHEMA = cv.Schema(
+    {
+        cv.Required(CONF_ID): cv.use_id(lv_chart_t),
+        cv.Required(CONF_SERIES_ID): cv.use_id(lv_chart_series_t_ptr),
+        cv.Required(CONF_SERIES_COLOR): lv_color,
+    }
+)
+
+
+@automation.register_action(
+    "lvgl.chart.set_series_color",
+    ObjUpdateAction,
+    CHART_SET_SERIES_COLOR_SCHEMA,
+)
+async def chart_set_series_color(config, action_id, template_arg, args):
+    """Change the color of a chart series dynamically"""
+    widgets = await get_widgets(config)
+    series = await cg.get_variable(config[CONF_SERIES_ID])
+    color = await lv_color.process(config[CONF_SERIES_COLOR])
+
+    async def do_set_color(w: Widget):
+        lv.chart_set_series_color(w.obj, series, color)
+        lv.chart_refresh(w.obj)
+
+    return await action_to_code(widgets, do_set_color, action_id, template_arg, args)
