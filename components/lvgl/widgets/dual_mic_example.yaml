@@ -5,13 +5,6 @@
 # =============================================================================
 
 globals:
-  # Audio sample buffers
-  - id: audio_sample_left
-    type: int
-    initial_value: "0"
-  - id: audio_sample_right
-    type: int
-    initial_value: "0"
   # Voice assistant state for visual feedback
   - id: va_is_listening
     type: bool
@@ -46,6 +39,29 @@ microphone:
     sample_rate: 16000
     bits_per_sample: 16bit
     adc_type: external
+    on_data:
+      - lambda: |-
+          // Audio data comes as int16_t samples
+          // For stereo: even indices = left, odd indices = right
+          const int16_t *samples = (const int16_t *)data.data();
+          int num_samples = data.size() / 2;  // 2 bytes per sample
+
+          if (num_samples > 0) {
+            // Get samples for both channels
+            // ES7210 with 2 mics: interleaved L/R data
+            for (int i = 0; i < num_samples && i < 64; i += 2) {
+              int16_t left = samples[i];
+              int16_t right = (i + 1 < num_samples) ? samples[i + 1] : samples[i];
+
+              // Update charts with real microphone data
+              lv_chart_set_next_value(id(chart_mic_left).obj,
+                                      lv_chart_get_series_next(id(chart_mic_left).obj, NULL),
+                                      left);
+              lv_chart_set_next_value(id(chart_mic_right).obj,
+                                      lv_chart_get_series_next(id(chart_mic_right).obj, NULL),
+                                      right);
+            }
+          }
 
 speaker:
   - platform: i2s_audio
@@ -149,7 +165,6 @@ micro_wake_word:
     then:
       - logger.log: "Wake word detected"
       - lambda: 'id(va_is_listening) = true;'
-      # Update UI to show listening state
       - lvgl.label.update:
           id: mic_status_label
           text: "Listening..."
@@ -222,45 +237,6 @@ voice_assistant:
         text: "Disconnected"
         text_color: 0xFF0000
     - micro_wake_word.stop:
-
-# =============================================================================
-# AUDIO WAVEFORM UPDATE
-# =============================================================================
-interval:
-  # Fast update for waveform display (8ms = ~125Hz refresh)
-  - interval: 8ms
-    then:
-      - lambda: |-
-          // Read microphone data and update charts
-          // ES7210 provides stereo input on I2S
-          // Left channel = MIC1, Right channel = MIC2
-
-          // Simulated waveform when voice assistant is listening
-          static float phase = 0;
-          if (id(va_is_listening)) {
-            // Active listening - show voice waveform
-            float noise = (rand() % 6000) - 3000;
-            id(audio_sample_left) = (int)(sin(phase) * 12000 +
-                                          sin(phase * 2.1) * 6000 +
-                                          noise);
-            id(audio_sample_right) = (int)(sin(phase * 0.95) * 11000 +
-                                           sin(phase * 1.8) * 7000 +
-                                           noise * 0.9);
-            phase += 0.12;
-          } else {
-            // Idle - show ambient noise floor
-            id(audio_sample_left) = (rand() % 1000) - 500;
-            id(audio_sample_right) = (rand() % 1000) - 500;
-          }
-      # Update charts with audio samples
-      - lvgl.chart.set_next_value:
-          id: chart_mic_left
-          series_index: 0
-          value: !lambda 'return id(audio_sample_left);'
-      - lvgl.chart.set_next_value:
-          id: chart_mic_right
-          series_index: 0
-          value: !lambda 'return id(audio_sample_right);'
 
 # =============================================================================
 # LVGL CONFIGURATION
@@ -391,27 +367,3 @@ lvgl:
                 text: "Wake word: 'Okay HAL'"
                 text_color: 0x606060
                 text_font: montserrat_14
-
-# =============================================================================
-# REAL MICROPHONE DATA INTEGRATION
-# =============================================================================
-# To read actual microphone data from ES7210, you need to access the I2S buffer.
-# The microphone component doesn't expose raw samples directly.
-#
-# For real waveform display, you can:
-# 1. Use a custom component to read I2S data
-# 2. Use the voice_assistant events to show activity
-# 3. Use ADC pins if available for analog monitoring
-#
-# Example custom I2S read (requires custom component):
-# - lambda: |-
-#     int16_t samples[64];
-#     size_t bytes_read;
-#     i2s_read(I2S_NUM_0, samples, sizeof(samples), &bytes_read, 0);
-#     if (bytes_read > 0) {
-#       // Left channel (even indices)
-#       id(audio_sample_left) = samples[0];
-#       // Right channel (odd indices)
-#       id(audio_sample_right) = samples[1];
-#     }
-#
