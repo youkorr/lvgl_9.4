@@ -16,19 +16,17 @@ Usage in ESPHome YAML:
     Method 1 - File on filesystem (SD card, LittleFS):
     - lottie:
         id: my_animation
-        width: 200
-        height: 200
         src: "/sdcard/animation.json"   # File path on ESP32 filesystem
+        width: 200                      # Required for src (can't read at compile time)
+        height: 200
         loop: true
         auto_start: true
 
-    Method 2 - Embedded in firmware:
+    Method 2 - Embedded in firmware (auto-detects size from JSON):
     - lottie:
         id: my_animation
-        width: 200
-        height: 200
         file: "animations/loading.json"  # Local file, embedded in firmware
-        loop: true
+        loop: true                       # width/height auto-detected from JSON
         auto_start: true
 
 Actions:
@@ -37,6 +35,7 @@ Actions:
     - lvgl.lottie.pause: my_animation
 """
 
+import json
 from pathlib import Path
 
 from esphome import automation, codegen as cg, config_validation as cv
@@ -53,6 +52,8 @@ from . import Widget, WidgetType, get_widgets
 
 CONF_LOTTIE = "lottie"
 CONF_LOOP = "loop"
+CONF_LOTTIE_WIDTH = "lottie_width"
+CONF_LOTTIE_HEIGHT = "lottie_height"
 
 lv_lottie_t = LvType("lv_lottie_t")
 
@@ -78,7 +79,7 @@ def lottie_file_validator(value):
 
 
 def validate_lottie_source(config):
-    """Ensure exactly one of src or file is specified."""
+    """Validate source and extract dimensions from JSON if using file method."""
     has_src = CONF_SRC in config
     has_file = CONF_FILE in config
 
@@ -86,13 +87,38 @@ def validate_lottie_source(config):
         raise cv.Invalid("Cannot specify both 'src' and 'file'. Use 'src' for filesystem path or 'file' for embedded.")
     if not has_src and not has_file:
         raise cv.Invalid("Must specify either 'src' (filesystem path) or 'file' (embedded in firmware).")
+
+    # For src method, width and height are required
+    if has_src:
+        if CONF_WIDTH not in config or CONF_HEIGHT not in config:
+            raise cv.Invalid("'width' and 'height' are required when using 'src' (filesystem path). Cannot auto-detect dimensions at compile time.")
+
+    # For file method, auto-detect dimensions from JSON
+    if has_file:
+        file_path = config[CONF_FILE]
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                lottie_data = json.load(f)
+                # Extract dimensions from Lottie JSON
+                lottie_width = lottie_data.get("w")
+                lottie_height = lottie_data.get("h")
+                if lottie_width is None or lottie_height is None:
+                    raise cv.Invalid(f"Lottie JSON file missing 'w' or 'h' dimensions: {file_path}")
+                # Store extracted dimensions
+                config[CONF_LOTTIE_WIDTH] = int(lottie_width)
+                config[CONF_LOTTIE_HEIGHT] = int(lottie_height)
+        except json.JSONDecodeError as e:
+            raise cv.Invalid(f"Invalid JSON in Lottie file {file_path}: {e}")
+        except Exception as e:
+            raise cv.Invalid(f"Error reading Lottie file {file_path}: {e}")
+
     return config
 
 
 LOTTIE_BASE_SCHEMA = cv.Schema(
     {
-        cv.Required(CONF_WIDTH): size,
-        cv.Required(CONF_HEIGHT): size,
+        cv.Optional(CONF_WIDTH): size,
+        cv.Optional(CONF_HEIGHT): size,
         cv.Optional(CONF_SRC): lottie_path_validator,
         cv.Optional(CONF_FILE): lottie_file_validator,
         cv.Optional(CONF_LOOP, default=True): cv.boolean,
@@ -129,8 +155,15 @@ class LottieType(WidgetType):
         add_lv_use("THORVG_INTERNAL")
         add_lv_use("VECTOR_GRAPHIC")
 
-        width = config[CONF_WIDTH]
-        height = config[CONF_HEIGHT]
+        # Get dimensions - either from config or auto-detected from JSON
+        if CONF_LOTTIE_WIDTH in config:
+            # Auto-detected from JSON file
+            width = config[CONF_LOTTIE_WIDTH]
+            height = config[CONF_LOTTIE_HEIGHT]
+        else:
+            # Manually specified (required for src method)
+            width = config[CONF_WIDTH]
+            height = config[CONF_HEIGHT]
 
         # Allocate render buffer for Lottie animation
         # ARGB8888 format is required for vector graphics (4 bytes per pixel)
@@ -139,6 +172,10 @@ class LottieType(WidgetType):
 
         # Set buffer for Lottie rendering
         lv.lottie_set_buffer(w.obj, width, height, lottie_buffer)
+
+        # Set widget size to match animation
+        from ..lvcode import lv_obj
+        lv_obj.set_size(w.obj, width, height)
 
         # Load animation - Method 1: From filesystem
         if src := config.get(CONF_SRC):
