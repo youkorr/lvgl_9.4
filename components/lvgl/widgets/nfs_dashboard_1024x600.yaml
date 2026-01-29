@@ -193,15 +193,17 @@ lvgl:
                 max_value: 100
                 value: 100
                 rotation: 135
-                bg_start_angle: 0
-                bg_end_angle: 270
+                start_angle: 0
+                end_angle: 270
                 mode: NORMAL
-                arc_width: 3
+                adjustable: false
                 indicator:
                   arc_color: 0x00FFFF
                   arc_width: 3
                   arc_opa: 30%
-                bg_arc_color: 0x001a1a
+                main:
+                  arc_color: 0x001a1a
+                  arc_width: 3
 
             # Speed Scale with ticks and labels
             - scale:
@@ -255,15 +257,17 @@ lvgl:
                 max_value: 320
                 value: 0
                 rotation: 135
-                bg_start_angle: 0
-                bg_end_angle: 270
+                start_angle: 0
+                end_angle: 270
                 mode: NORMAL
-                arc_width: 30
+                adjustable: false
                 indicator:
                   arc_color: 0x00FFFF
                   arc_width: 30
                   arc_opa: 85%
-                bg_arc_color: 0x0a0a0a
+                main:
+                  arc_color: 0x0a0a0a
+                  arc_width: 30
 
             # Digital Speed Display
             - label:
@@ -300,15 +304,17 @@ lvgl:
                 max_value: 100
                 value: 100
                 rotation: 135
-                bg_start_angle: 0
-                bg_end_angle: 270
+                start_angle: 0
+                end_angle: 270
                 mode: NORMAL
-                arc_width: 3
+                adjustable: false
                 indicator:
                   arc_color: 0x00FFFF
                   arc_width: 3
                   arc_opa: 30%
-                bg_arc_color: 0x001a1a
+                main:
+                  arc_color: 0x001a1a
+                  arc_width: 3
 
             # RPM Scale with ticks and labels
             - scale:
@@ -362,15 +368,17 @@ lvgl:
                 max_value: 9000
                 value: 800
                 rotation: 135
-                bg_start_angle: 0
-                bg_end_angle: 270
+                start_angle: 0
+                end_angle: 270
                 mode: NORMAL
-                arc_width: 30
+                adjustable: false
                 indicator:
                   arc_color: 0x00FFFF
                   arc_width: 30
                   arc_opa: 85%
-                bg_arc_color: 0x0a0a0a
+                main:
+                  arc_color: 0x0a0a0a
+                  arc_width: 30
 
             # Digital RPM Display
             - label:
