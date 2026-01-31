@@ -3,11 +3,9 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "lvgl_esphome.h"
-#include "lv_fs_driver.h"
 
 #include "core/lv_obj_class_private.h"
 
-#include <cstring>
 #include <numeric>
 
 namespace esphome::lvgl {
@@ -74,7 +72,10 @@ std::string lv_event_code_name_for(lv_event_t *event) {
   if (event_code < sizeof(EVENT_NAMES) / sizeof(EVENT_NAMES[0])) {
     return EVENT_NAMES[event_code];
   }
-  return str_sprintf("%2d", event_code);
+  // max 4 bytes: "%u" with uint8_t (max 255, 3 digits) + null
+  char buf[4];
+  snprintf(buf, sizeof(buf), "%u", event_code);
+  return buf;
 }
 
 static void rounder_cb(lv_event_t *event) {
@@ -133,9 +134,6 @@ void LvglComponent::esphome_lvgl_init() {
   lv_tick_set_cb([] { return millis(); });
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());
-
-  // Initialize LVGL filesystem driver for SD card access (S:/ = /sdcard/)
-  LvglFsDriver::init();
 }
 
 void LvglComponent::add_event_cb(lv_obj_t *obj, event_callback_t callback, lv_event_code_t event) {
@@ -550,9 +548,10 @@ void LvglComponent::setup() {
     frac = 1;
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
-  // CRITICAL: Always use lv_malloc_core() which guarantees 64-byte alignment
-  // Don't use malloc() as it may not be aligned correctly for LVGL 9.4
-  buffer = lv_malloc_core(buf_bytes);  // NOLINT
+  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
+    buffer = malloc(buf_bytes);  // NOLINT
+  if (buffer == nullptr)
+    buffer = lv_malloc_core(buf_bytes);  // NOLINT
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
     frac = MIN_BUFFER_FRAC;
@@ -568,14 +567,11 @@ void LvglComponent::setup() {
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
   lv_display_set_resolution(this->disp_, this->width_, this->height_);
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
-  // CRITICAL: Set user_data BEFORE flush_cb, as flush_cb uses user_data
-  lv_display_set_user_data(this->disp_, this);
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
+  lv_display_set_user_data(this->disp_, this);
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
-  // CRITICAL FIX: Do NOT call lv_display_set_buffers() here!
-  // It can trigger immediate rendering which deadlocks because loop() hasn't started yet.
-  // Store buf_bytes for delayed configuration in loop()
-  this->buf_bytes_ = buf_bytes;
+  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
+                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
@@ -608,12 +604,6 @@ void LvglComponent::setup() {
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
-
-  // CRITICAL: Configure buffers at the VERY END of setup()
-  // This avoids deadlock while ensuring buffers are ready before any callbacks execute
-  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, this->buf_bytes_,
-                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
-  this->buffers_configured_ = true;
 }
 
 void LvglComponent::update() {
@@ -625,12 +615,6 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
-  // Mark that loop has started - LVGL is now fully ready for operations
-  if (!this->loop_started_) {
-    this->loop_started_ = true;
-    ESP_LOGD(TAG, "LVGL loop started - system is now fully ready");
-  }
-
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
@@ -706,65 +690,15 @@ void lv_mem_init() {}
 void lv_mem_deinit() {}
 
 #if defined(USE_HOST) || defined(USE_RP2040) || defined(USE_ESP8266)
-// Memory alignment for draw buffers on non-ESP32 platforms.
-// We use 64-byte alignment for optimal performance even though LV_DRAW_BUF_ALIGN
-// is set to 4 (to avoid warnings from LVGL's internal stack/static buffers).
-// Standard malloc() only guarantees 8-16 byte alignment, so we implement
-// our own aligned allocation.
-static constexpr size_t LVGL_ALIGNMENT = 64;
-
-// Store original pointer before aligned address for proper freeing
 void *lv_malloc_core(size_t size) {
-  if (size == 0)
-    return nullptr;
-
-  // Allocate extra space for alignment and to store original pointer
-  size_t total_size = size + LVGL_ALIGNMENT + sizeof(void *);
-  void *raw = malloc(total_size);  // NOLINT
-  if (raw == nullptr) {
+  auto *ptr = malloc(size);  // NOLINT
+  if (ptr == nullptr) {
     ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes", size);
-    return nullptr;
   }
-
-  // Calculate aligned pointer (leaving space for original pointer storage)
-  uintptr_t raw_addr = reinterpret_cast<uintptr_t>(raw);
-  uintptr_t aligned_addr = (raw_addr + sizeof(void *) + LVGL_ALIGNMENT - 1) & ~(LVGL_ALIGNMENT - 1);
-  void *aligned = reinterpret_cast<void *>(aligned_addr);
-
-  // Store original pointer just before aligned address
-  reinterpret_cast<void **>(aligned)[-1] = raw;
-
-  return aligned;
+  return ptr;
 }
-
-void lv_free_core(void *ptr) {
-  if (ptr == nullptr)
-    return;
-  // Retrieve and free the original pointer
-  void *raw = reinterpret_cast<void **>(ptr)[-1];
-  free(raw);  // NOLINT
-}
-
-void *lv_realloc_core(void *ptr, size_t size) {
-  if (ptr == nullptr)
-    return lv_malloc_core(size);
-  if (size == 0) {
-    lv_free_core(ptr);
-    return nullptr;
-  }
-
-  // Allocate new aligned buffer and copy data
-  void *new_ptr = lv_malloc_core(size);
-  if (new_ptr == nullptr)
-    return nullptr;
-
-  // We don't know the old size, so we copy 'size' bytes (safe if new >= old)
-  // This is a limitation but matches typical realloc usage patterns
-  memcpy(new_ptr, ptr, size);
-  lv_free_core(ptr);
-
-  return new_ptr;
-}
+void lv_free_core(void *ptr) { return free(ptr); }                            // NOLINT
+void *lv_realloc_core(void *ptr, size_t size) { return realloc(ptr, size); }  // NOLINT
 
 void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) { memset(mon_p, 0, sizeof(lv_mem_monitor_t)); }
 
@@ -787,32 +721,16 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {
 
 void *lv_malloc_core(size_t size) {
   void *ptr;
-  // Use 64-byte alignment for optimal ESP32 PSRAM/cache performance.
-  // Note: LV_DRAW_BUF_ALIGN is set to 4 to avoid LVGL warnings from
-  // internal stack/static buffers, but heap allocations use 64-byte alignment.
-  constexpr size_t LVGL_ALIGNMENT = 64;
-
-  // BUGFIX: Don't modify global cap_bits - use local variable
-  unsigned caps = cap_bits;
-
-  // Try PSRAM first
-  ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, caps);
+  ptr = heap_caps_malloc(size, cap_bits);
   if (ptr == nullptr) {
-    // Fallback to internal RAM if PSRAM allocation fails
-    caps = MALLOC_CAP_8BIT;
-    ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, caps);
+    cap_bits = MALLOC_CAP_8BIT;
+    ptr = heap_caps_malloc(size, cap_bits);
   }
-
   if (ptr == nullptr) {
-    ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes (64-byte aligned)", size);
+    ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes", size);
     return nullptr;
   }
-
-  // Log only very large buffers (>1MB) for debugging
-  if (size > 1000000) {
-    ESP_LOGI(esphome::lvgl::TAG, "Large buffer allocated: %zu bytes at %p", size, ptr);
-  }
-
+  ESP_LOGV(esphome::lvgl::TAG, "allocate %zu - > %p", size, ptr);
   return ptr;
 }
 
@@ -825,24 +743,6 @@ void lv_free_core(void *ptr) {
 
 void *lv_realloc_core(void *ptr, size_t size) {
   ESP_LOGV(esphome::lvgl::TAG, "realloc %p: %zu", ptr, size);
-
-  if (ptr == nullptr)
-    return lv_malloc_core(size);
-  if (size == 0) {
-    lv_free_core(ptr);
-    return nullptr;
-  }
-
-  // CRITICAL: heap_caps_realloc does NOT preserve 64-byte alignment!
-  // We must allocate a new aligned buffer and copy the data
-  void *new_ptr = lv_malloc_core(size);
-  if (new_ptr == nullptr)
-    return nullptr;
-
-  // Copy data to new buffer (we don't know old size, copy 'size' bytes)
-  memcpy(new_ptr, ptr, size);
-  lv_free_core(ptr);
-
-  return new_ptr;
+  return heap_caps_realloc(ptr, size, cap_bits);
 }
 #endif
