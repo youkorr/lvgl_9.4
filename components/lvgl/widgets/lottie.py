@@ -181,8 +181,61 @@ class LottieType(WidgetType):
         lv_obj.set_size(w.obj, width, height)
 
         # Load animation - Method 1: From filesystem
+        # NOTE: We DON'T use lv_lottie_set_src_file() because it loads the file
+        # on the stack, causing stack overflow on ESP32. Instead, we manually
+        # load the file to heap memory and use lv_lottie_set_src_data().
         if src := config.get(CONF_SRC):
-            lv.lottie_set_src_file(w.obj, src)
+            # Use lv_add with RawStatement to generate the file loading code
+            # NOTE: We load the JSON file to heap instead of letting lv_lottie_set_src_file
+            # use the stack, which causes stack overflow on ESP32 with ThorVG
+            from ..lvcode import lv_add
+            # Add required includes for file I/O and heap allocation
+            cg.add_global(cg.RawExpression('#include <stdio.h>'))
+            cg.add_global(cg.RawExpression('#include "esp_heap_caps.h"'))
+
+            load_code = f'''
+// Load Lottie JSON file to heap to avoid stack overflow
+do {{
+    FILE *f = fopen("{src}", "rb");
+    if (f == NULL) {{
+        ESP_LOGE("lottie", "Failed to open Lottie file: {src}");
+        break;
+    }}
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    // Allocate in heap (PSRAM if available) + 1 for null terminator
+    char *json_buf = (char *)heap_caps_malloc(fsize + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (json_buf == NULL) {{
+        // Fallback to regular heap if PSRAM not available
+        json_buf = (char *)malloc(fsize + 1);
+    }}
+
+    if (json_buf == NULL) {{
+        fclose(f);
+        ESP_LOGE("lottie", "Failed to allocate %ld bytes for Lottie JSON", fsize);
+        break;
+    }}
+
+    size_t read_size = fread(json_buf, 1, fsize, f);
+    fclose(f);
+
+    if (read_size != (size_t)fsize) {{
+        free(json_buf);
+        ESP_LOGE("lottie", "Failed to read Lottie file completely");
+        break;
+    }}
+
+    json_buf[fsize] = '\\0';  // Null terminate for ThorVG parser
+
+    // Load from heap buffer instead of file (avoids stack overflow)
+    lv_lottie_set_src_data({w.obj}, json_buf, fsize);
+    ESP_LOGI("lottie", "Loaded Lottie animation from {src} (%ld bytes)", fsize);
+
+    // Note: Buffer stays allocated - LVGL needs it for animation playback
+}} while(0)'''
+            lv_add(cg.RawStatement(load_code))
 
         # Load animation - Method 2: From embedded data
         elif file_path := config.get(CONF_FILE):
