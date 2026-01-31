@@ -63,7 +63,12 @@ def lottie_path_validator(value):
     value = cv.string(value)
     if not value.startswith("/"):
         raise cv.Invalid(
-            f"Lottie src must be a file path starting with '/', got: {value}"
+            f"Lottie src must be an absolute file path starting with '/', got: '{value}'. "
+            f"Example: '/sdcard/animation.json' or '/littlefs/animation.json'"
+        )
+    if not value.endswith(".json"):
+        raise cv.Invalid(
+            f"Lottie src must be a JSON file (ending with .json), got: '{value}'"
         )
     return value
 
@@ -185,11 +190,17 @@ class LottieType(WidgetType):
             with open(file_path, "rb") as f:
                 json_data = f.read()
 
-            # Create progmem array with the JSON data
+            # CRITICAL: Add null terminator for ThorVG JSON parser
+            # LVGL documentation specifies "nul terminated array" is required
+            # Without this, ThorVG may read past the buffer causing crashes on ESP32
+            json_data_with_null = json_data + b'\x00'
+
+            # Create progmem array with the JSON data (including null terminator)
             raw_data_id = config[CONF_RAW_DATA_ID]
-            prog_arr = cg.progmem_array(raw_data_id, list(json_data))
+            prog_arr = cg.progmem_array(raw_data_id, list(json_data_with_null))
 
             # Use lv_lottie_set_src_data to load from memory
+            # Pass original length (without null) as ThorVG expects the JSON size
             lv.lottie_set_src_data(w.obj, prog_arr, len(json_data))
 
         # Set looping (requires accessing the internal animation)
