@@ -132,6 +132,56 @@ class CanvasType(WidgetType):
 CanvasType()
 
 
+# Global layer storage for batched drawing operations
+# Key: canvas widget id, Value: layer variable name
+_canvas_layers = {}
+
+
+@automation.register_action(
+    "lvgl.canvas.begin_draw",
+    ObjUpdateAction,
+    cv.Schema(
+        {
+            cv.GenerateID(CONF_ID): cv.use_id(lv_canvas_t),
+        },
+    ),
+)
+async def canvas_begin_draw(config, action_id, template_arg, args):
+    """Begin a batch of drawing operations. Call end_draw when finished."""
+    widget = await get_widgets(config)
+
+    async def do_begin(w: Widget):
+        # Create persistent layer for this canvas
+        from ..lvcode import lv_add
+        layer_name = f"canvas_layer_{id(w)}"
+        lv_add(cg.RawStatement(f"static lv_layer_t {layer_name};"))
+        lv.canvas_init_layer(w.obj, literal(f"&{layer_name}"))
+        _canvas_layers[id(w)] = layer_name
+
+    return await action_to_code(widget, do_begin, action_id, template_arg, args, config)
+
+
+@automation.register_action(
+    "lvgl.canvas.end_draw",
+    ObjUpdateAction,
+    cv.Schema(
+        {
+            cv.GenerateID(CONF_ID): cv.use_id(lv_canvas_t),
+        },
+    ),
+)
+async def canvas_end_draw(config, action_id, template_arg, args):
+    """End a batch of drawing operations and render to screen."""
+    widget = await get_widgets(config)
+
+    async def do_end(w: Widget):
+        layer_name = _canvas_layers.get(id(w))
+        if layer_name:
+            lv.canvas_finish_layer(w.obj, literal(f"&{layer_name}"))
+
+    return await action_to_code(widget, do_end, action_id, template_arg, args, config)
+
+
 @automation.register_action(
     "lvgl.canvas.fill",
     ObjUpdateAction,
