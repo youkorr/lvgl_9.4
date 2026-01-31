@@ -249,23 +249,135 @@ static bool lottie_load_from_file(lv_obj_t *obj, const char *path) {
             lv_add(cg.RawStatement(load_call))
 
         # Load animation - Method 2: From embedded data
+        # NOTE: ThorVG parsing requires significant stack space (>32KB).
+        # We create a dedicated FreeRTOS task with stack allocated in PSRAM
+        # to avoid stack overflow on ESP32.
         elif file_path := config.get(CONF_FILE):
+            from ..lvcode import lv_add
+
             # Read the JSON file content
             with open(file_path, "rb") as f:
                 json_data = f.read()
 
             # CRITICAL: Add null terminator for ThorVG JSON parser
-            # LVGL documentation specifies "nul terminated array" is required
-            # Without this, ThorVG may read past the buffer causing crashes on ESP32
             json_data_with_null = json_data + b'\x00'
 
             # Create progmem array with the JSON data (including null terminator)
             raw_data_id = config[CONF_RAW_DATA_ID]
             prog_arr = cg.progmem_array(raw_data_id, list(json_data_with_null))
 
-            # Use lv_lottie_set_src_data to load from memory
-            # Pass original length (without null) as ThorVG expects the JSON size
-            lv.lottie_set_src_data(w.obj, prog_arr, len(json_data))
+            # Add required includes for FreeRTOS task with PSRAM stack
+            cg.add_global(cg.RawExpression('#include "freertos/FreeRTOS.h"'))
+            cg.add_global(cg.RawExpression('#include "freertos/task.h"'))
+            cg.add_global(cg.RawExpression('#include "freertos/semphr.h"'))
+            cg.add_global(cg.RawExpression('#include "esp_heap_caps.h"'))
+
+            # Define the global helper for loading Lottie in a task with PSRAM stack
+            helper_code = '''
+// Lottie loader with dedicated task using PSRAM stack
+// ThorVG parsing requires >32KB stack which exceeds ESP32 internal RAM limits
+#ifndef LOTTIE_TASK_LOADER_DEFINED
+#define LOTTIE_TASK_LOADER_DEFINED
+
+typedef struct {
+    lv_obj_t *obj;
+    const void *data;
+    size_t data_size;
+    SemaphoreHandle_t done_sem;
+} lottie_task_params_t;
+
+static void lottie_parse_task(void *arg) {
+    lottie_task_params_t *params = (lottie_task_params_t *)arg;
+
+    ESP_LOGI("lottie", "Parsing Lottie in dedicated task (stack in PSRAM)...");
+    lv_lottie_set_src_data(params->obj, params->data, params->data_size);
+    ESP_LOGI("lottie", "Lottie parsing complete!");
+
+    xSemaphoreGive(params->done_sem);
+    vTaskDelete(NULL);
+}
+
+static bool lottie_load_with_psram_stack(lv_obj_t *obj, const void *data, size_t data_size) {
+    ESP_LOGI("lottie", "Loading Lottie animation (%zu bytes) with PSRAM task stack...", data_size);
+
+    // Allocate 64KB stack in PSRAM
+    const size_t stack_size = 64 * 1024;
+    StackType_t *task_stack = (StackType_t *)heap_caps_malloc(stack_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (task_stack == NULL) {
+        ESP_LOGE("lottie", "Failed to allocate task stack in PSRAM, trying internal RAM...");
+        task_stack = (StackType_t *)malloc(stack_size);
+        if (task_stack == NULL) {
+            ESP_LOGE("lottie", "Failed to allocate task stack!");
+            return false;
+        }
+    }
+
+    // Allocate task control block in internal RAM (required by FreeRTOS)
+    StaticTask_t *task_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (task_tcb == NULL) {
+        ESP_LOGE("lottie", "Failed to allocate task TCB!");
+        free(task_stack);
+        return false;
+    }
+
+    // Setup parameters
+    lottie_task_params_t params;
+    params.obj = obj;
+    params.data = data;
+    params.data_size = data_size;
+    params.done_sem = xSemaphoreCreateBinary();
+
+    if (params.done_sem == NULL) {
+        ESP_LOGE("lottie", "Failed to create semaphore!");
+        free(task_stack);
+        free(task_tcb);
+        return false;
+    }
+
+    // Create task with static allocation (stack in PSRAM)
+    TaskHandle_t task_handle = xTaskCreateStatic(
+        lottie_parse_task,
+        "lottie_parse",
+        stack_size / sizeof(StackType_t),
+        &params,
+        5,  // Priority
+        task_stack,
+        task_tcb
+    );
+
+    if (task_handle == NULL) {
+        ESP_LOGE("lottie", "Failed to create Lottie parsing task!");
+        vSemaphoreDelete(params.done_sem);
+        free(task_stack);
+        free(task_tcb);
+        return false;
+    }
+
+    // Wait for task to complete (max 60 seconds for complex animations)
+    ESP_LOGI("lottie", "Waiting for Lottie parsing to complete...");
+    bool success = xSemaphoreTake(params.done_sem, pdMS_TO_TICKS(60000)) == pdTRUE;
+
+    if (!success) {
+        ESP_LOGE("lottie", "Lottie parsing timed out!");
+    } else {
+        ESP_LOGI("lottie", "Lottie animation loaded successfully!");
+    }
+
+    // Cleanup
+    vSemaphoreDelete(params.done_sem);
+    free(task_stack);
+    free(task_tcb);
+
+    return success;
+}
+#endif
+'''
+            cg.add_global(cg.RawExpression(helper_code))
+
+            # Call the loader function with PSRAM stack
+            json_size = len(json_data)
+            load_call = f'lottie_load_with_psram_stack({w.obj}, {prog_arr}, {json_size})'
+            lv_add(cg.RawStatement(load_call))
 
         # Set looping (requires accessing the internal animation)
         # Note: In LVGL 9.4, use lv_lottie_get_anim() to get animation handle
