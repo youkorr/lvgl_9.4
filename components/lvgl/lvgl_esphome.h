@@ -210,8 +210,6 @@ class LvglComponent : public PollingComponent {
   void set_resume_trigger(Trigger<> *trigger) { this->resume_callback_ = trigger; }
   void set_draw_start_trigger(Trigger<> *trigger) { this->draw_start_callback_ = trigger; }
   void set_draw_end_trigger(Trigger<> *trigger) { this->draw_end_callback_ = trigger; }
-  // Check if loop() has started - safe to perform LVGL operations
-  bool is_loop_started() const { return this->loop_started_; }
 
  protected:
   void draw_end_();
@@ -247,9 +245,6 @@ class LvglComponent : public PollingComponent {
   Trigger<> *draw_start_callback_{};
   Trigger<> *draw_end_callback_{};
   void *rotate_buf_{};
-  bool buffers_configured_{false};  // Track if lv_display_set_buffers() has been called
-  size_t buf_bytes_{0};              // Store buffer size for delayed configuration
-  bool loop_started_{false};         // Track if loop() has been called - safe for LVGL ops
 };
 
 class IdleTrigger : public Trigger<> {
@@ -436,25 +431,4 @@ class LvKeyboardType : public key_provider::KeyProvider, public LvCompound {
   void set_obj(lv_obj_t *lv_obj) override;
 };
 #endif  // USE_LVGL_KEYBOARD
-
-#ifdef USE_LVGL_CALENDAR
-class LvCalendarType : public LvCompound {
- public:
-  uint16_t get_selected_year() {
-    lv_calendar_date_t date;
-    lv_calendar_get_pressed_date(this->obj, &date);
-    return date.year;
-  }
-  uint8_t get_selected_month() {
-    lv_calendar_date_t date;
-    lv_calendar_get_pressed_date(this->obj, &date);
-    return date.month;
-  }
-  uint8_t get_selected_day() {
-    lv_calendar_date_t date;
-    lv_calendar_get_pressed_date(this->obj, &date);
-    return date.day;
-  }
-};
-#endif  // USE_LVGL_CALENDAR
 }  // namespace esphome::lvgl
