@@ -33,6 +33,9 @@ Actions:
     - lvgl.lottie.start: my_animation
     - lvgl.lottie.stop: my_animation
     - lvgl.lottie.pause: my_animation
+
+Note: ThorVG parsing requires a large stack (32KB+). On ESP32, the loading is
+deferred to a FreeRTOS task with stack allocated in PSRAM to avoid stack overflow.
 """
 
 import json
@@ -50,6 +53,9 @@ from ..lvcode import lv
 from ..types import LvType, ObjUpdateAction
 from . import Widget, WidgetType, get_widgets
 
+# Global flag to track if include has been added
+_lottie_include_added = False
+
 CONF_LOTTIE = "lottie"
 CONF_LOOP = "loop"
 CONF_LOTTIE_WIDTH = "lottie_width"
@@ -63,7 +69,12 @@ def lottie_path_validator(value):
     value = cv.string(value)
     if not value.startswith("/"):
         raise cv.Invalid(
-            f"Lottie src must be a file path starting with '/', got: {value}"
+            f"Lottie src must be an absolute file path starting with '/', got: '{value}'. "
+            f"Example: '/sdcard/animation.json' or '/littlefs/animation.json'"
+        )
+    if not value.endswith(".json"):
+        raise cv.Invalid(
+            f"Lottie src must be a JSON file (ending with .json), got: '{value}'"
         )
     return value
 
@@ -149,59 +160,69 @@ class LottieType(WidgetType):
         return ("LOTTIE", "THORVG_INTERNAL", "VECTOR_GRAPHIC")
 
     async def to_code(self, w: Widget, config):
+        global _lottie_include_added
+
         add_lv_use("LOTTIE")
         add_lv_use("THORVG_INTERNAL")
         add_lv_use("VECTOR_GRAPHIC")
 
+        from ..lvcode import lv_obj, lv_add
+
         # Get dimensions - either from config or auto-detected from JSON
         if CONF_LOTTIE_WIDTH in config:
-            # Auto-detected from JSON file
             width = config[CONF_LOTTIE_WIDTH]
             height = config[CONF_LOTTIE_HEIGHT]
         else:
-            # Manually specified (required for src method)
             width = config[CONF_WIDTH]
             height = config[CONF_HEIGHT]
 
-        # Allocate render buffer for Lottie animation
-        # ARGB8888 format is required for vector graphics (4 bytes per pixel)
-        buf_size = literal(f"({width} * {height} * 4)")
-        lottie_buffer = lv.malloc_core(buf_size)
-
-        # Set buffer for Lottie rendering
-        lv.lottie_set_buffer(w.obj, width, height, lottie_buffer)
-
-        # Set widget size to match animation
-        from ..lvcode import lv_obj
+        # Set widget size
         lv_obj.set_size(w.obj, width, height)
 
-        # Load animation - Method 1: From filesystem
-        if src := config.get(CONF_SRC):
-            lv.lottie_set_src_file(w.obj, src)
+        # Add include for lottie loader helper (once)
+        if not _lottie_include_added:
+            _lottie_include_added = True
+            cg.add_global(cg.RawExpression('#include "esphome/components/lvgl/lottie_loader.h"'))
 
-        # Load animation - Method 2: From embedded data
+        # Create unique buffer name using widget id
+        widget_id = str(w.obj).replace("->", "_").replace(".", "_")
+        buf_name = f"lottie_buf_{widget_id}"
+
+        # Declare static buffer pointer
+        buf_size = width * height * 4
+        cg.add_global(cg.RawExpression(f"static uint8_t *{buf_name} = nullptr"))
+
+        # Allocate buffer in PSRAM and set it FIRST (before data loading)
+        # This ensures LVGL has a valid buffer even before animation data is loaded
+        if src := config.get(CONF_SRC):
+            # File from filesystem
+            lv_add(cg.RawStatement(f"""
+    {buf_name} = (uint8_t *)heap_caps_malloc({buf_size}, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if ({buf_name} != nullptr) {{
+        lv_lottie_set_buffer({w.obj}, {width}, {height}, {buf_name});
+        esphome::lvgl::lottie_load_async({w.obj}, nullptr, 0, "{src}");
+    }} else {{
+        ESP_LOGE("lottie", "Failed to allocate lottie buffer in PSRAM");
+    }}"""))
         elif file_path := config.get(CONF_FILE):
-            # Read the JSON file content
+            # Embedded data
             with open(file_path, "rb") as f:
                 json_data = f.read()
 
-            # Create progmem array with the JSON data
+            # Add null terminator
+            json_data_with_null = json_data + b'\x00'
+
             raw_data_id = config[CONF_RAW_DATA_ID]
-            prog_arr = cg.progmem_array(raw_data_id, list(json_data))
+            prog_arr = cg.progmem_array(raw_data_id, list(json_data_with_null))
 
-            # Use lv_lottie_set_src_data to load from memory
-            lv.lottie_set_src_data(w.obj, prog_arr, len(json_data))
-
-        # Set looping (requires accessing the internal animation)
-        # Note: In LVGL 9.4, use lv_lottie_get_anim() to get animation handle
-        if not config.get(CONF_LOOP, True):
-            # If not looping, set repeat count to 1
-            pass  # Default is looping, non-loop not directly supported in simple API
-
-        # Auto-start animation
-        if config.get(CONF_AUTO_START, True):
-            # Animation starts automatically when src is set
-            pass
+            lv_add(cg.RawStatement(f"""
+    {buf_name} = (uint8_t *)heap_caps_malloc({buf_size}, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if ({buf_name} != nullptr) {{
+        lv_lottie_set_buffer({w.obj}, {width}, {height}, {buf_name});
+        esphome::lvgl::lottie_load_async({w.obj}, {prog_arr}, {len(json_data)}, nullptr);
+    }} else {{
+        ESP_LOGE("lottie", "Failed to allocate lottie buffer in PSRAM");
+    }}"""))
 
 
 lottie_spec = LottieType()
@@ -222,7 +243,6 @@ async def lottie_start(config, action_id, template_arg, args):
     widget = await get_widgets(config)
 
     async def do_start(w: Widget):
-        # Get the animation handle and resume it
         lv.anim_start(lv.lottie_get_anim(w.obj))
 
     return await action_to_code(widget, do_start, action_id, template_arg, args)
@@ -243,7 +263,6 @@ async def lottie_stop(config, action_id, template_arg, args):
     widget = await get_widgets(config)
 
     async def do_stop(w: Widget):
-        # Delete the animation to stop it
         lv.anim_delete(w.obj, literal("NULL"))
 
     return await action_to_code(widget, do_stop, action_id, template_arg, args)
@@ -264,7 +283,6 @@ async def lottie_pause(config, action_id, template_arg, args):
     widget = await get_widgets(config)
 
     async def do_pause(w: Widget):
-        # Pause by setting animation to stopped state
         lv.anim_delete(w.obj, literal("NULL"))
 
     return await action_to_code(widget, do_pause, action_id, template_arg, args)
