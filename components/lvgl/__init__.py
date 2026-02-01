@@ -390,8 +390,10 @@ async def to_code(configs):
     write_file_if_changed(lv_conf_h_file, generate_lv_conf_h())
     cg.add_build_flag("-DLV_CONF_H=1")
     cg.add_build_flag(f'-DLV_CONF_PATH=\\"{LV_CONF_FILENAME}\\"')
-    # Add include path for atomic.h shim (needed for LV_USE_OS=LV_OS_FREERTOS)
-    cg.add_build_flag("-Icomponents/lvgl")
+    # Add include path for atomic.h shim (needed for LV_USE_OS=LV_OS_FREERTOS on ESP-IDF)
+    # Use absolute path so it works when LVGL compiles from .piolibdeps/
+    component_dir = Path(__file__).parent
+    cg.add_build_flag(f"-I{component_dir}")
 
     for prop in df.get_remapped_uses():
         df.LOGGER.warning(
