@@ -237,6 +237,12 @@ async def to_code(configs):
     df.add_define("LV_USE_VECTOR_GRAPHIC", "1")
     # Enable ThorVG vector graphics engine (built-in to LVGL v9)
     df.add_define("LV_USE_THORVG_INTERNAL", "1")
+    # ThorVG optimizations for ESP32
+    df.add_define("LV_VG_LITE_THORVG_16PIXELS_ALIGN", "1")  # Optimize for 16-pixel alignment
+    # Enable FreeRTOS threading support for LVGL draw operations
+    df.add_define("LV_USE_OS", "LV_OS_FREERTOS")
+    # Draw thread stack size - 48KB for ThorVG rendering (allocated separately from main task)
+    df.add_define("LV_DRAW_THREAD_STACK_SIZE", "(48 * 1024)")
     # Enable SVG support (requires ThorVG)
     df.add_define("LV_USE_SVG", "1")
     # Enable Lottie animation support (requires ThorVG)
