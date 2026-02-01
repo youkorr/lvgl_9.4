@@ -239,7 +239,11 @@ async def to_code(configs):
     df.add_define("LV_USE_THORVG_INTERNAL", "1")
     # ThorVG optimizations for ESP32
     df.add_define("LV_VG_LITE_THORVG_16PIXELS_ALIGN", "1")  # Optimize for 16-pixel alignment
-    # Note: LV_USE_OS=LV_OS_FREERTOS not compatible with ESP-IDF (missing atomic.h)
+    # Enable FreeRTOS threading for LVGL draw operations
+    # Note: atomic.h shim added in components/lvgl/ for ESP-IDF compatibility
+    df.add_define("LV_USE_OS", "LV_OS_FREERTOS")
+    # Draw thread stack size - 48KB for ThorVG rendering
+    df.add_define("LV_DRAW_THREAD_STACK_SIZE", "(48 * 1024)")
     # Enable SVG support (requires ThorVG)
     df.add_define("LV_USE_SVG", "1")
     # Enable Lottie animation support (requires ThorVG)
@@ -386,6 +390,8 @@ async def to_code(configs):
     write_file_if_changed(lv_conf_h_file, generate_lv_conf_h())
     cg.add_build_flag("-DLV_CONF_H=1")
     cg.add_build_flag(f'-DLV_CONF_PATH=\\"{LV_CONF_FILENAME}\\"')
+    # Add include path for atomic.h shim (needed for LV_USE_OS=LV_OS_FREERTOS)
+    cg.add_build_flag("-Icomponents/lvgl")
 
     for prop in df.get_remapped_uses():
         df.LOGGER.warning(
