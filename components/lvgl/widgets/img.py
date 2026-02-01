@@ -40,7 +40,7 @@ BASE_IMG_SCHEMA = cv.Schema(
 
 IMG_SCHEMA = BASE_IMG_SCHEMA.extend(
     {
-        cv.Required(CONF_SRC): lv_image,
+        cv.Optional(CONF_SRC): lv_image,  # ← APRÈS (optionnel)
     }
 )
 
