@@ -227,6 +227,13 @@ async def to_code(configs):
     df.add_define("LV_USE_STDLIB_MALLOC", "LV_STDLIB_CUSTOM")
 
     # ============================================
+    # LVGL PERFORMANCE OPTIMIZATIONS
+    # ============================================
+    # Reduce refresh period for better camera/video performance
+    # Default is 33ms (30 FPS), we use 10ms for smoother updates
+    df.add_define("LV_DEF_REFR_PERIOD", "10")
+
+    # ============================================
     # THORVG + SVG/LOTTIE SUPPORT (LVGL v9.4+)
     # ============================================
     # Enable floating point support (required by matrix)
@@ -239,11 +246,12 @@ async def to_code(configs):
     df.add_define("LV_USE_THORVG_INTERNAL", "1")
     # ThorVG optimizations for ESP32
     df.add_define("LV_VG_LITE_THORVG_16PIXELS_ALIGN", "1")  # Optimize for 16-pixel alignment
-    # Enable FreeRTOS threading for LVGL draw operations
-    # Note: atomic.h shim added in components/lvgl/ for ESP-IDF compatibility
-    df.add_define("LV_USE_OS", "LV_OS_FREERTOS")
-    # Draw thread stack size - 48KB for ThorVG rendering
-    df.add_define("LV_DRAW_THREAD_STACK_SIZE", "(48 * 1024)")
+    # Disable FreeRTOS threading - simplifies rendering pipeline
+    # Threading adds synchronization overhead that hurts camera/video performance
+    # Single-threaded mode is faster for continuous frame updates
+    df.add_define("LV_USE_OS", "LV_OS_NONE")
+    # Keep draw thread stack size for reference (not used with LV_OS_NONE)
+    # df.add_define("LV_DRAW_THREAD_STACK_SIZE", "(48 * 1024)")
     # Enable SVG support (requires ThorVG)
     df.add_define("LV_USE_SVG", "1")
     # Enable Lottie animation support (requires ThorVG)
@@ -390,7 +398,7 @@ async def to_code(configs):
     write_file_if_changed(lv_conf_h_file, generate_lv_conf_h())
     cg.add_build_flag("-DLV_CONF_H=1")
     cg.add_build_flag(f'-DLV_CONF_PATH=\\"{LV_CONF_FILENAME}\\"')
-    # Add include path for atomic.h shim (needed for LV_USE_OS=LV_OS_FREERTOS on ESP-IDF)
+    # Add include path for LVGL component headers (lottie_loader.h, atomic.h, etc.)
     # Use absolute path so it works when LVGL compiles from .piolibdeps/
     component_dir = Path(__file__).parent
     cg.add_build_flag(f"-I{component_dir}")
