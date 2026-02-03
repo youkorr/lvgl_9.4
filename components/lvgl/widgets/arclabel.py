@@ -32,9 +32,20 @@ lv_arclabel_t = LvType("lv_arclabel_t")
 
 # Validators
 SIGNED_ANGLE = cv.int_range(min=-360, max=360)
-DIRECTION = cv.enum(["clockwise", "counter_clockwise"])
-VERT_ALIGN = cv.enum(["leading", "trailing", "center"])
-HORIZ_ALIGN = cv.enum(["left", "right", "center"])
+DIRECTION = cv.enum({
+    "clockwise": "clockwise",
+    "counter_clockwise": "counter_clockwise"
+})
+VERT_ALIGN = cv.enum({
+    "leading": "leading",
+    "trailing": "trailing",
+    "center": "center"
+})
+HORIZ_ALIGN = cv.enum({
+    "left": "left",
+    "right": "right",
+    "center": "center"
+})
 
 # Schema
 ARCLABEL_SCHEMA = cv.Schema(
@@ -149,6 +160,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
