@@ -66,6 +66,11 @@ class ArcLabelType(WidgetType):
         angle_size = end_angle - start_angle
         lv.arclabel_set_angle_size(w.obj, angle_size)
 
+        # Set widget size to contain the arc
+        # Size should be at least 2*radius to fit the full arc
+        widget_size = radius * 2 + 20  # Add padding
+        lv.obj_set_size(w.obj, widget_size, widget_size)
+
         # Combine start_angle and rotation to get final rotation
         # The arc starts at 0° by default, so we rotate it to start_angle
         rotation = await lv_angle_degrees.process(config[CONF_ROTATION])
