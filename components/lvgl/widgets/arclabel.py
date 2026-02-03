@@ -16,7 +16,6 @@ Supports:
 
 import esphome.config_validation as cv
 from esphome.const import CONF_ROTATION, CONF_TEXT
-from esphome.components import color  # <-- import color validator
 from ..helpers import lvgl_components_required
 from ..lv_validation import lv_angle_degrees, lv_text, pixels
 from ..lvcode import lv
@@ -65,7 +64,7 @@ ARCLABEL_SCHEMA = cv.Schema({
     cv.Optional(CONF_START_ANGLE, default=0): SIGNED_ANGLE,
     cv.Optional(CONF_END_ANGLE, default=360): SIGNED_ANGLE,
     cv.Optional(CONF_ROTATION, default=0): SIGNED_ANGLE,
-    cv.Optional(CONF_TEXT_COLOR, default=0xFFFFFF): color.color,  # <-- use color.color
+    cv.Optional(CONF_TEXT_COLOR, default=0xFFFFFF): cv.color,  # <-- correct validator
     cv.Optional(CONF_TEXT_FONT, default=None): cv.maybe(cv.font),
     cv.Optional(CONF_DIRECTION, default="clockwise"): DIRECTION,
     cv.Optional(CONF_TEXT_VERTICAL_ALIGN, default="center"): TEXT_ALIGN,
