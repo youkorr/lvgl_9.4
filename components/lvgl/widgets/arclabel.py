@@ -15,7 +15,7 @@ from ..defines import (
     CONF_START_ANGLE,
 )
 from ..helpers import lvgl_components_required
-from ..lv_validation import lv_angle_degrees, lv_signed_angle_degrees, lv_int, lv_text, pixels
+from ..lv_validation import lv_angle_degrees, lv_int, lv_text, pixels
 from ..lvcode import lv
 from ..types import LvType
 from . import Widget, WidgetType
