@@ -49,7 +49,7 @@ class ArcLabelType(WidgetType):
             (CONF_MAIN,),
             ARCLABEL_SCHEMA,
             modify_schema={
-                cv.Optional(CONF_TEXT): lv_text,
+                cv.Optional(CONF_TEXT): lv_text,  # ✅ permet lvgl.arclabel.update avec text
             },
         )
 
@@ -61,20 +61,20 @@ class ArcLabelType(WidgetType):
         text = await lv_text.process(config[CONF_TEXT])
         lv.arclabel_set_text(w.obj, text)
 
-        # Set radius
-        radius = await pixels.process(config[CONF_RADIUS])
+        # Set radius (use default if not provided)
+        radius = await pixels.process(config.get(CONF_RADIUS, 100))
         lv.arclabel_set_radius(w.obj, radius)
 
-        # Signed angles (already validated)
-        start_angle = config[CONF_START_ANGLE]
-        end_angle = config[CONF_END_ANGLE]
-        rotation = config[CONF_ROTATION]
+        # Signed angles (use defaults if not provided)
+        start_angle = config.get(CONF_START_ANGLE, 0)
+        end_angle = config.get(CONF_END_ANGLE, 360)
+        rotation = config.get(CONF_ROTATION, 0)
 
         # Arc size (span)
         angle_size = end_angle - start_angle
         lv.arclabel_set_angle_size(w.obj, angle_size)
 
-        # Widget size (ensure it fits the arc)
+        # Widget size
         widget_size = radius * 2 + 20  # padding
         lv.obj_set_size(w.obj, widget_size, widget_size)
 
@@ -95,6 +95,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
