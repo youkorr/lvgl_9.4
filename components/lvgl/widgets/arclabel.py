@@ -19,7 +19,6 @@ from ..lv_validation import lv_angle_degrees, lv_int, lv_text, pixels
 from ..lvcode import lv, lv_expr
 from ..types import LvType
 from . import Widget, WidgetType
-from esphome.components import color
 
 # -------------------------------------------------------------------
 # Constants
@@ -30,7 +29,6 @@ CONF_TEXT_VERTICAL_ALIGN = "text_vertical_align"
 CONF_TEXT_HORIZONTAL_ALIGN = "text_horizontal_align"
 CONF_RECOLOR = "recolor"
 CONF_OFFSET = "offset"
-CONF_TEXT_COLOR = "text_color"
 
 lv_arclabel_t = LvType("lv_arclabel_t")
 
@@ -64,7 +62,6 @@ ARCLABEL_SCHEMA = cv.Schema({
     cv.Optional(CONF_TEXT_HORIZONTAL_ALIGN, default="center"): TEXT_ALIGN,
     cv.Optional(CONF_RECOLOR, default=False): cv.boolean,
     cv.Optional(CONF_OFFSET, default=0): cv.int_,
-    cv.Optional(CONF_TEXT_COLOR, default=0xFFFFFF): color.color,
 })
 
 # -------------------------------------------------------------------
@@ -124,9 +121,6 @@ class ArcLabelType(WidgetType):
         # Offset
         lv.arclabel_set_offset(w.obj, config.get(CONF_OFFSET, 0))
 
-        # Text color
-        lv.obj_set_style_text_color(w.obj, config.get(CONF_TEXT_COLOR), 0)
-
     async def to_code_update(self, w: Widget, config):
         """Dynamic text update"""
         if CONF_TEXT in config:
@@ -141,6 +135,7 @@ class ArcLabelType(WidgetType):
 # Global instance
 # -------------------------------------------------------------------
 arclabel_spec = ArcLabelType()
+
 
 
 
