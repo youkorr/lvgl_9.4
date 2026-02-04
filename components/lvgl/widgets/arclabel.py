@@ -1,6 +1,7 @@
 """
 LVGL Arc Label Widget Implementation
-Compatible ESPHome / LVGL arclabel
+Compatible ESPHome + LVGL 9.4
+Rotation implemented via object transform (ESPHome-safe)
 """
 
 import esphome.config_validation as cv
@@ -22,11 +23,12 @@ CONF_ARCLABEL = "arclabel"
 
 lv_arclabel_t = LvType("lv_arclabel_t")
 
+# Arc label schema
 ARCLABEL_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_TEXT): lv_text,
         cv.Optional(CONF_RADIUS, default=100): pixels,
-        cv.Optional(CONF_START_ANGLE, default=0): lv_angle_degrees,  # informational only
+        cv.Optional(CONF_START_ANGLE, default=0): lv_angle_degrees,
         cv.Optional(CONF_END_ANGLE, default=360): lv_angle_degrees,
         cv.Optional(CONF_ROTATION, default=0): lv_angle_degrees,
     }
@@ -47,15 +49,15 @@ class ArcLabelType(WidgetType):
     async def to_code(self, w: Widget, config):
         lvgl_components_required.add(CONF_ARCLABEL)
 
-        # Text
+        # Set text
         text = await lv_text.process(config[CONF_TEXT])
         lv.arclabel_set_text(w.obj, text)
 
-        # Radius
+        # Set radius
         radius = await pixels.process(config.get(CONF_RADIUS, 100))
         lv.arclabel_set_radius(w.obj, radius)
 
-        # Arc size ONLY (start angle not supported by API)
+        # Arc angle size (start angle not supported by arclabel API)
         start_angle = config.get(CONF_START_ANGLE, 0)
         end_angle = config.get(CONF_END_ANGLE, 360)
 
@@ -70,12 +72,12 @@ class ArcLabelType(WidgetType):
         lv.obj_set_style_transform_angle(
             w.obj,
             int(rotation * 10),
-            lv.PART_MAIN,
+            0,  # LV_PART_MAIN (ESPHome-safe)
         )
 
-        # Ensure center rotation
-        lv.obj_set_style_transform_pivot_x(w.obj, radius, lv.PART_MAIN)
-        lv.obj_set_style_transform_pivot_y(w.obj, radius, lv.PART_MAIN)
+        # Rotate around center
+        lv.obj_set_style_transform_pivot_x(w.obj, radius, 0)
+        lv.obj_set_style_transform_pivot_y(w.obj, radius, 0)
 
         # Widget size
         size = radius * 2 + 50
@@ -90,7 +92,9 @@ class ArcLabelType(WidgetType):
         return ("label",)
 
 
+# Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
