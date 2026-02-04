@@ -1,8 +1,5 @@
 """
 LVGL v9.4 Arc Label Widget Implementation
-
-The arc label widget displays text along a curved path (arc).
-This is an advanced widget for circular/curved text displays.
 """
 
 import esphome.config_validation as cv
@@ -25,12 +22,8 @@ CONF_DIRECTION = "direction"
 
 lv_arclabel_t = LvType("lv_arclabel_t")
 
-# -------------------------------------------------------------------
-# Local validator: allow signed angles
-# -------------------------------------------------------------------
 SIGNED_ANGLE = cv.int_range(min=-360, max=360)
 
-# Arc label schema
 ARCLABEL_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_TEXT): lv_text,
@@ -42,11 +35,11 @@ ARCLABEL_SCHEMA = cv.Schema(
     }
 )
 
-# Map YAML string → integer (C++ enum underlying type)
-def lv_direction_int(direction: str):
+# Map YAML string → LVGL enum directly
+def lv_direction_enum(direction: str):
     if direction == "clockwise":
-        return 0  # LV_ARCLABEL_DIR_CLOCKWISE
-    return 1      # LV_ARCLABEL_DIR_COUNTERCLOCKWISE
+        return lv.LV_ARCLABEL_DIR_CLOCKWISE
+    return lv.LV_ARCLABEL_DIR_COUNTERCLOCKWISE
 
 
 class ArcLabelType(WidgetType):
@@ -56,9 +49,7 @@ class ArcLabelType(WidgetType):
             lv_arclabel_t,
             (CONF_MAIN,),
             ARCLABEL_SCHEMA,
-            modify_schema={
-                cv.Optional(CONF_TEXT): lv_text,
-            },
+            modify_schema={cv.Optional(CONF_TEXT): lv_text},
         )
 
     async def to_code(self, w: Widget, config):
@@ -89,8 +80,8 @@ class ArcLabelType(WidgetType):
         total_rotation = start_angle + rotation
         lv.obj_set_style_transform_rotation(w.obj, total_rotation * 10, 0)
 
-        # Direction as integer
-        lv.arclabel_set_dir(w.obj, lv_direction_int(config.get(CONF_DIRECTION, "clockwise")))
+        # Direction (enum!)
+        lv.arclabel_set_dir(w.obj, lv_direction_enum(config.get(CONF_DIRECTION, "clockwise")))
 
     async def to_code_update(self, w: Widget, config):
         if CONF_TEXT in config:
@@ -101,7 +92,6 @@ class ArcLabelType(WidgetType):
         return ("label",)
 
 
-# Global instance
 arclabel_spec = ArcLabelType()
 
 
