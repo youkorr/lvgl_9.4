@@ -1,5 +1,8 @@
 """
 LVGL v9.4 Arc Label Widget Implementation
+
+The arc label widget displays text along a curved path (arc).
+This is an advanced widget for circular/curved text displays.
 """
 
 import esphome.config_validation as cv
@@ -18,10 +21,10 @@ from ..types import LvType
 from . import Widget, WidgetType
 
 CONF_ARCLABEL = "arclabel"
-CONF_DIRECTION = "direction"
 
 lv_arclabel_t = LvType("lv_arclabel_t")
 
+# Allow signed angles (negative rotation)
 SIGNED_ANGLE = cv.int_range(min=-360, max=360)
 
 ARCLABEL_SCHEMA = cv.Schema(
@@ -31,15 +34,8 @@ ARCLABEL_SCHEMA = cv.Schema(
         cv.Optional(CONF_START_ANGLE, default=0): SIGNED_ANGLE,
         cv.Optional(CONF_END_ANGLE, default=360): SIGNED_ANGLE,
         cv.Optional(CONF_ROTATION, default=0): SIGNED_ANGLE,
-        cv.Optional(CONF_DIRECTION, default="clockwise"): cv.one_of("clockwise", "counterclockwise"),
     }
 )
-
-# Map YAML string → LVGL enum directly
-def lv_direction_enum(direction: str):
-    if direction == "clockwise":
-        return lv.LV_ARCLABEL_DIR_CLOCKWISE
-    return lv.LV_ARCLABEL_DIR_COUNTERCLOCKWISE
 
 
 class ArcLabelType(WidgetType):
@@ -49,10 +45,11 @@ class ArcLabelType(WidgetType):
             lv_arclabel_t,
             (CONF_MAIN,),
             ARCLABEL_SCHEMA,
-            modify_schema={cv.Optional(CONF_TEXT): lv_text},
+            modify_schema={},
         )
 
     async def to_code(self, w: Widget, config):
+        """Generate C++ code for arc label widget configuration"""
         lvgl_components_required.add(CONF_ARCLABEL)
 
         # Text
@@ -68,7 +65,7 @@ class ArcLabelType(WidgetType):
         end_angle = config.get(CONF_END_ANGLE, 360)
         rotation = config.get(CONF_ROTATION, 0)
 
-        # Arc size
+        # Arc span
         angle_size = end_angle - start_angle
         lv.arclabel_set_angle_size(w.obj, angle_size)
 
@@ -76,14 +73,12 @@ class ArcLabelType(WidgetType):
         widget_size = radius * 2 + 50
         lv.obj_set_size(w.obj, widget_size, widget_size)
 
-        # Rotation (LVGL uses 0.1° units)
+        # Total rotation (LVGL 0.1° units)
         total_rotation = start_angle + rotation
         lv.obj_set_style_transform_rotation(w.obj, total_rotation * 10, 0)
 
-        # Direction (enum!)
-        lv.arclabel_set_dir(w.obj, lv_direction_enum(config.get(CONF_DIRECTION, "clockwise")))
-
     async def to_code_update(self, w: Widget, config):
+        """Update text dynamically"""
         if CONF_TEXT in config:
             text = await lv_text.process(config[CONF_TEXT])
             lv.arclabel_set_text(w.obj, text)
@@ -93,6 +88,7 @@ class ArcLabelType(WidgetType):
 
 
 arclabel_spec = ArcLabelType()
+
 
 
 
