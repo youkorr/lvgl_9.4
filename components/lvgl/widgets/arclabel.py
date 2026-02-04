@@ -26,7 +26,7 @@ CONF_DIRECTION = "direction"
 lv_arclabel_t = LvType("lv_arclabel_t")
 
 # -------------------------------------------------------------------
-# Local validator: allow signed angles (do NOT touch lv_angle_degrees)
+# Local validator: allow signed angles
 # -------------------------------------------------------------------
 SIGNED_ANGLE = cv.int_range(min=-360, max=360)
 
@@ -42,11 +42,11 @@ ARCLABEL_SCHEMA = cv.Schema(
     }
 )
 
-# Map YAML direction strings → LVGL constants
+# Map YAML string → LVGL enumeration (do NOT use lv.const)
 def lv_direction_const(direction: str):
     if direction == "clockwise":
-        return lv.const(lv.LV_ARCLABEL_DIR_CLOCKWISE)
-    return lv.const(lv.LV_ARCLABEL_DIR_COUNTERCLOCKWISE)
+        return lv.LV_ARCLABEL_DIR_CLOCKWISE
+    return lv.LV_ARCLABEL_DIR_COUNTERCLOCKWISE
 
 
 class ArcLabelType(WidgetType):
@@ -73,20 +73,20 @@ class ArcLabelType(WidgetType):
         lv.arclabel_set_radius(w.obj, radius)
 
         # Angles
-        start_angle = config.get(CONF_START_ANGLE, 0) % 360
-        end_angle = config.get(CONF_END_ANGLE, 360) % 360
-        rotation = config.get(CONF_ROTATION, 0) % 360
+        start_angle = config.get(CONF_START_ANGLE, 0)
+        end_angle = config.get(CONF_END_ANGLE, 360)
+        rotation = config.get(CONF_ROTATION, 0)
 
-        # Arc size (span)
-        angle_size = (end_angle - start_angle) % 360
+        # Arc size
+        angle_size = end_angle - start_angle
         lv.arclabel_set_angle_size(w.obj, angle_size)
 
         # Widget size
         widget_size = radius * 2 + 50
         lv.obj_set_size(w.obj, widget_size, widget_size)
 
-        # Final rotation
-        total_rotation = (start_angle + rotation) % 360
+        # Rotation (LVGL uses 0.1° units)
+        total_rotation = start_angle + rotation
         lv.obj_set_style_transform_rotation(w.obj, total_rotation * 10, 0)
 
         # Direction
@@ -103,6 +103,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
