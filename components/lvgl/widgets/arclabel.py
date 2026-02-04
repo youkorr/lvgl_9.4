@@ -1,7 +1,7 @@
 """
 LVGL Arc Label Widget Implementation
-Compatible ESPHome + LVGL 9.4
-Rotation implemented via object transform (ESPHome-safe)
+ESPHome compatible – LVGL 9.4
+Rotation via object transform (no screen displacement)
 """
 
 import esphome.config_validation as cv
@@ -49,15 +49,15 @@ class ArcLabelType(WidgetType):
     async def to_code(self, w: Widget, config):
         lvgl_components_required.add(CONF_ARCLABEL)
 
-        # Set text
+        # Text
         text = await lv_text.process(config[CONF_TEXT])
         lv.arclabel_set_text(w.obj, text)
 
-        # Set radius
+        # Radius
         radius = await pixels.process(config.get(CONF_RADIUS, 100))
         lv.arclabel_set_radius(w.obj, radius)
 
-        # Arc angle size (start angle not supported by arclabel API)
+        # Arc angle size (arclabel has no start-angle API)
         start_angle = config.get(CONF_START_ANGLE, 0)
         end_angle = config.get(CONF_END_ANGLE, 360)
 
@@ -67,21 +67,24 @@ class ArcLabelType(WidgetType):
 
         lv.arclabel_set_angle_size(w.obj, angle_size)
 
-        # Rotation via LVGL object transform (0.1° units)
+        # -------------------------------------------------
+        # IMPORTANT: size BEFORE transform
+        # -------------------------------------------------
+        size = radius * 2 + 50
+        lv.obj_set_size(w.obj, size, size)
+
+        # Pivot EXACTLY at center
+        pivot = size // 2
+        lv.obj_set_style_transform_pivot_x(w.obj, pivot, 0)
+        lv.obj_set_style_transform_pivot_y(w.obj, pivot, 0)
+
+        # Rotation (0.1° units)
         rotation = config.get(CONF_ROTATION, 0)
         lv.obj_set_style_transform_angle(
             w.obj,
             int(rotation * 10),
             0,  # LV_PART_MAIN (ESPHome-safe)
         )
-
-        # Rotate around center
-        lv.obj_set_style_transform_pivot_x(w.obj, radius, 0)
-        lv.obj_set_style_transform_pivot_y(w.obj, radius, 0)
-
-        # Widget size
-        size = radius * 2 + 50
-        lv.obj_set_size(w.obj, size, size)
 
     async def to_code_update(self, w: Widget, config):
         if CONF_TEXT in config:
@@ -94,6 +97,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
