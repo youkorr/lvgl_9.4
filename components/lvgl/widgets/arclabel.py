@@ -42,11 +42,11 @@ ARCLABEL_SCHEMA = cv.Schema(
     }
 )
 
-# Map YAML string → LVGL enumeration (do NOT use lv.const)
-def lv_direction_const(direction: str):
+# Map YAML string → integer (C++ enum underlying type)
+def lv_direction_int(direction: str):
     if direction == "clockwise":
-        return lv.LV_ARCLABEL_DIR_CLOCKWISE
-    return lv.LV_ARCLABEL_DIR_COUNTERCLOCKWISE
+        return 0  # LV_ARCLABEL_DIR_CLOCKWISE
+    return 1      # LV_ARCLABEL_DIR_COUNTERCLOCKWISE
 
 
 class ArcLabelType(WidgetType):
@@ -89,8 +89,8 @@ class ArcLabelType(WidgetType):
         total_rotation = start_angle + rotation
         lv.obj_set_style_transform_rotation(w.obj, total_rotation * 10, 0)
 
-        # Direction
-        lv.arclabel_set_dir(w.obj, lv_direction_const(config.get(CONF_DIRECTION, "clockwise")))
+        # Direction as integer
+        lv.arclabel_set_dir(w.obj, lv_direction_int(config.get(CONF_DIRECTION, "clockwise")))
 
     async def to_code_update(self, w: Widget, config):
         if CONF_TEXT in config:
@@ -103,6 +103,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
