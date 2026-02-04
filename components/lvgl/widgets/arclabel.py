@@ -35,24 +35,24 @@ lv_arclabel_t = LvType("lv_arclabel_t")
 # -------------------------------------------------------------------
 SIGNED_ANGLE = cv.int_range(min=-360, max=360)
 
-# Direction options
+# Direction options (map to LVGL expressions)
 DIRECTION_OPTIONS = {
-    "clockwise": lv.LV_ARCLABEL_DIR_CLOCKWISE,
-    "counter_clockwise": lv.LV_ARCLABEL_DIR_COUNTER_CLOCKWISE,
+    "clockwise": lambda: lv.const(lv.LV_ARCLABEL_DIR_CLOCKWISE),
+    "counter_clockwise": lambda: lv.const(lv.LV_ARCLABEL_DIR_COUNTER_CLOCKWISE),
 }
 
 # Vertical alignment options
 VERTICAL_ALIGN_OPTIONS = {
-    "top": lv.LV_ARCLABEL_TEXT_ALIGN_LEADING,
-    "center": lv.LV_ARCLABEL_TEXT_ALIGN_CENTER,
-    "bottom": lv.LV_ARCLABEL_TEXT_ALIGN_TRAILING,
+    "top": lambda: lv.const(lv.LV_ARCLABEL_TEXT_ALIGN_LEADING),
+    "center": lambda: lv.const(lv.LV_ARCLABEL_TEXT_ALIGN_CENTER),
+    "bottom": lambda: lv.const(lv.LV_ARCLABEL_TEXT_ALIGN_TRAILING),
 }
 
 # Horizontal alignment options
 HORIZONTAL_ALIGN_OPTIONS = {
-    "leading": lv.LV_ARCLABEL_TEXT_ALIGN_LEADING,
-    "center": lv.LV_ARCLABEL_TEXT_ALIGN_CENTER,
-    "trailing": lv.LV_ARCLABEL_TEXT_ALIGN_TRAILING,
+    "leading": lambda: lv.const(lv.LV_ARCLABEL_TEXT_ALIGN_LEADING),
+    "center": lambda: lv.const(lv.LV_ARCLABEL_TEXT_ALIGN_CENTER),
+    "trailing": lambda: lv.const(lv.LV_ARCLABEL_TEXT_ALIGN_TRAILING),
 }
 
 # Arc label schema
@@ -108,12 +108,16 @@ class ArcLabelType(WidgetType):
         total_rotation = start_angle + rotation
         lv.obj_set_style_transform_rotation(w.obj, total_rotation * 10, 0)
 
-        # Set direction
-        lv.arclabel_set_dir(w.obj, DIRECTION_OPTIONS[config.get(CONF_DIRECTION, "clockwise")])
+        # Set direction using lambda -> lv.const(...)
+        lv.arclabel_set_dir(w.obj, DIRECTION_OPTIONS[config.get(CONF_DIRECTION, "clockwise")]())
 
         # Set vertical & horizontal alignment
-        lv.arclabel_set_text_vertical_align(w.obj, VERTICAL_ALIGN_OPTIONS[config.get(CONF_TEXT_VERTICAL_ALIGN, "center")])
-        lv.arclabel_set_text_horizontal_align(w.obj, HORIZONTAL_ALIGN_OPTIONS[config.get(CONF_TEXT_HORIZONTAL_ALIGN, "center")])
+        lv.arclabel_set_text_vertical_align(
+            w.obj, VERTICAL_ALIGN_OPTIONS[config.get(CONF_TEXT_VERTICAL_ALIGN, "center")]()
+        )
+        lv.arclabel_set_text_horizontal_align(
+            w.obj, HORIZONTAL_ALIGN_OPTIONS[config.get(CONF_TEXT_HORIZONTAL_ALIGN, "center")]()
+        )
 
         # Set offset
         offset = await pixels.process(config.get(CONF_OFFSET, 0))
@@ -135,6 +139,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
