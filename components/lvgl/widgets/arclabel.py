@@ -1,14 +1,12 @@
 """
 LVGL v9.4 Arc Label Widget Implementation
 
-The arc label widget displays text along a curved path (arc).
-Supports: text, radius, start/end angles, rotation, direction,
-vertical/horizontal alignment, recolor, offset, text_color (with names)
+Displays text along a curved path (arc) with rotation, direction,
+alignment, recolor, offset, and text color support.
 """
 
 import esphome.config_validation as cv
 from esphome.const import CONF_ROTATION, CONF_TEXT
-from esphome.components import color
 
 from ..defines import (
     CONF_END_ANGLE,
@@ -63,7 +61,7 @@ ARCLABEL_SCHEMA = cv.Schema(
         cv.Optional(CONF_TEXT_HORIZONTAL_ALIGN, default="center"): TEXT_ALIGN,
         cv.Optional(CONF_RECOLOR, default=False): cv.boolean,
         cv.Optional(CONF_OFFSET, default=0): cv.int_,
-        cv.Optional(CONF_TEXT_COLOR, default="white"): color.ColorExpression,
+        cv.Optional(CONF_TEXT_COLOR, default=0xFFFFFF): cv.color,
     }
 )
 
@@ -79,7 +77,6 @@ class ArcLabelType(WidgetType):
         )
 
     async def to_code(self, w: Widget, config):
-        """Generate C++ code for arc label widget configuration"""
         lvgl_components_required.add(CONF_ARCLABEL)
 
         # Set text
@@ -119,12 +116,10 @@ class ArcLabelType(WidgetType):
         # Offset
         lv.arclabel_set_offset(w.obj, config.get(CONF_OFFSET, 0))
 
-        # Text color (support name or hex)
-        text_color = await color.process(config[CONF_TEXT_COLOR])
-        lv.obj_set_style_text_color(w.obj, text_color, 0)
+        # Text color
+        lv.obj_set_style_text_color(w.obj, config.get(CONF_TEXT_COLOR), 0)
 
     async def to_code_update(self, w: Widget, config):
-        """Allow updating text dynamically"""
         if CONF_TEXT in config:
             text = await lv_text.process(config[CONF_TEXT])
             lv.arclabel_set_text(w.obj, text)
@@ -135,6 +130,7 @@ class ArcLabelType(WidgetType):
 
 # Global instance
 arclabel_spec = ArcLabelType()
+
 
 
 
