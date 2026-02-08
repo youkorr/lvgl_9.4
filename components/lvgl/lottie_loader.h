@@ -34,6 +34,11 @@ inline void lottie_load_task(void *param) {
 
     ESP_LOGI(LOTTIE_TAG, "Loading lottie animation data...");
 
+    // CRITICAL: Acquire LVGL lock before any LVGL API call.
+    // lv_lottie_set_src_data/file modifies ThorVG state that the
+    // render loop also accesses via anim_exec_cb → lottie_update.
+    lv_lock();
+
     // Load source data or file (ThorVG parsing happens here - needs large stack)
     if (p->data != nullptr) {
         lv_lottie_set_src_data(p->obj, p->data, p->data_size);
@@ -59,6 +64,12 @@ inline void lottie_load_task(void *param) {
     } else {
         ESP_LOGW(LOTTIE_TAG, "  Canvas buffer: NOT SET");
     }
+
+    // Show the widget now that data is loaded
+    // (was hidden to prevent ThorVG rendering with no picture data)
+    lv_obj_remove_flag(p->obj, LV_OBJ_FLAG_HIDDEN);
+
+    lv_unlock();
 
     // Free the params struct
     heap_caps_free(param);

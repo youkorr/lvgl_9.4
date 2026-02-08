@@ -179,6 +179,13 @@ class LottieType(WidgetType):
         # Set widget size
         lv_obj.set_size(w.obj, width, height)
 
+        # CRITICAL: Hide widget until data is loaded.
+        # The LVGL lottie constructor starts the animation immediately.
+        # anim_exec_cb calls lottie_update which runs ThorVG canvas draw/sync.
+        # Without loaded picture data, ThorVG can crash on ESP32-P4.
+        # The loader task will remove HIDDEN flag after data is loaded.
+        lv_obj.add_flag(w.obj, literal("LV_OBJ_FLAG_HIDDEN"))
+
         # Add include for lottie loader helper (once)
         if not _lottie_include_added:
             _lottie_include_added = True
