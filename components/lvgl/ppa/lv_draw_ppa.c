@@ -51,33 +51,32 @@ void lv_draw_ppa_init(void)
     ppa_client_config_t cfg;
     lv_memzero(&cfg, sizeof(cfg));
 
-    /* Register SRM client - use 64-byte burst to reduce SPIRAM bandwidth
-     * contention with DSI and prevent underrun (PR #9612) */
+    /* Register SRM client */
     cfg.oper_type = PPA_OPERATION_SRM;
     cfg.max_pending_trans_num = 1;
-    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_64;
+    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_128;
 
     res = ppa_register_client(&cfg, &draw_ppa_unit->srm_client);
     if(res != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register SRM client: %d", res);
     }
 
-    /* Register Fill client - 64-byte burst to reduce SPIRAM/DSI contention */
+    /* Register Fill client */
     lv_memzero(&cfg, sizeof(cfg));
     cfg.oper_type = PPA_OPERATION_FILL;
     cfg.max_pending_trans_num = 1;
-    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_64;
+    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_128;
 
     res = ppa_register_client(&cfg, &draw_ppa_unit->fill_client);
     if(res != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register Fill client: %d", res);
     }
 
-    /* Register Blend client - 64-byte burst to reduce SPIRAM/DSI contention */
+    /* Register Blend client */
     lv_memzero(&cfg, sizeof(cfg));
     cfg.oper_type = PPA_OPERATION_BLEND;
     cfg.max_pending_trans_num = 1;
-    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_64;
+    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_128;
 
     res = ppa_register_client(&cfg, &draw_ppa_unit->blend_client);
     if(res != ESP_OK) {
