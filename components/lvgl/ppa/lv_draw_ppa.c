@@ -31,7 +31,6 @@ static inline bool ppa_buf_usable(lv_draw_buf_t * buf)
 static int32_t ppa_evaluate(lv_draw_unit_t * draw_unit, lv_draw_task_t * task);
 static int32_t ppa_dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer);
 static int32_t ppa_delete(lv_draw_unit_t * draw_unit);
-static void  ppa_execute_drawing(lv_draw_ppa_unit_t * u);
 
 /**********************
  *   GLOBAL FUNCTIONS
@@ -39,39 +38,19 @@ static void  ppa_execute_drawing(lv_draw_ppa_unit_t * u);
 
 void lv_draw_ppa_init(void)
 {
-    esp_err_t res;
-    ppa_client_config_t cfg;
-    lv_memzero(&cfg, sizeof(cfg));
-
-    /* Create draw unit */
-    lv_draw_buf_ppa_init_handlers();
-
     lv_draw_ppa_unit_t * draw_ppa_unit = (lv_draw_ppa_unit_t *)lv_draw_create_unit(sizeof(lv_draw_ppa_unit_t));
     draw_ppa_unit->base_unit.evaluate_cb = ppa_evaluate;
     draw_ppa_unit->base_unit.dispatch_cb = ppa_dispatch;
     draw_ppa_unit->base_unit.delete_cb = ppa_delete;
 
-    /* Register SRM client */
-    cfg.oper_type = PPA_OPERATION_SRM;
-    cfg.max_pending_trans_num = 1;
-    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_128;
+    LV_LOG_INFO("PPA draw unit registered (diagnostic mode - no PPA ops)");
 
-    res = ppa_register_client(&cfg, &draw_ppa_unit->srm_client);
-    LV_ASSERT(res == ESP_OK);
-
-    /* Register Fill client */
-    cfg.oper_type = PPA_OPERATION_FILL;
-    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_128;
-
-    res = ppa_register_client(&cfg, &draw_ppa_unit->fill_client);
-    LV_ASSERT(res == ESP_OK);
-
-    /* Register Blend client */
-    cfg.oper_type = PPA_OPERATION_BLEND;
-    cfg.data_burst_length = PPA_DATA_BURST_LENGTH_128;
-
-    res = ppa_register_client(&cfg, &draw_ppa_unit->blend_client);
-    LV_ASSERT(res == ESP_OK);
+    /*
+     * DIAGNOSTIC: Skip PPA client registration for now.
+     * If the crash stops, the issue is in PPA operations.
+     * If the crash persists, the issue is in lv_draw_create_unit() or
+     * how LVGL handles the new draw unit with LV_USE_OS=LV_OS_FREERTOS.
+     */
 }
 
 void lv_draw_ppa_deinit(void)
@@ -81,114 +60,27 @@ void lv_draw_ppa_deinit(void)
 /**********************
  *   STATIC FUNCTIONS
  **********************/
+
+/* DIAGNOSTIC: Always return 0 - never claim any task */
 static int32_t ppa_evaluate(lv_draw_unit_t * u, lv_draw_task_t * t)
 {
     LV_UNUSED(u);
-
-    if(t == NULL || t->draw_dsc == NULL || t->target_layer == NULL) return 0;
-
-    switch(t->type) {
-        case LV_DRAW_TASK_TYPE_FILL: {
-            const lv_draw_fill_dsc_t * dsc = (const lv_draw_fill_dsc_t *)t->draw_dsc;
-            if(dsc->radius != 0) return 0;
-            if(dsc->grad.dir != LV_GRAD_DIR_NONE) return 0;
-            if(dsc->opa < (lv_opa_t)LV_OPA_MAX) return 0;
-
-            lv_draw_buf_t * draw_buf = t->target_layer->draw_buf;
-            if(!ppa_buf_usable(draw_buf)) return 0;
-            if(!ppa_dest_cf_supported((lv_color_format_t)draw_buf->header.cf)) return 0;
-
-            if(t->preference_score > 70) {
-                t->preference_score = 70;
-                t->preferred_draw_unit_id = DRAW_UNIT_ID_PPA;
-            }
-            return 1;
-        }
-
-        case LV_DRAW_TASK_TYPE_IMAGE: {
-            const lv_draw_image_dsc_t * dsc = (const lv_draw_image_dsc_t *)t->draw_dsc;
-            if(dsc->rotation != 0) return 0;
-            if(dsc->skew_x != 0 || dsc->skew_y != 0) return 0;
-            if(dsc->scale_x != LV_SCALE_NONE || dsc->scale_y != LV_SCALE_NONE) return 0;
-            if(dsc->opa < (lv_opa_t)LV_OPA_MAX) return 0;
-            if(dsc->blend_mode != LV_BLEND_MODE_NORMAL) return 0;
-            if(!ppa_src_cf_supported((lv_color_format_t)dsc->header.cf)) return 0;
-
-            lv_draw_buf_t * dest_buf = t->target_layer->draw_buf;
-            if(!ppa_buf_usable(dest_buf)) return 0;
-            if(!ppa_dest_cf_supported((lv_color_format_t)dest_buf->header.cf)) return 0;
-
-            if(t->preference_score > 70) {
-                t->preference_score = 70;
-                t->preferred_draw_unit_id = DRAW_UNIT_ID_PPA;
-            }
-            return 1;
-        }
-
-        default:
-            break;
-    }
-
+    LV_UNUSED(t);
     return 0;
 }
 
+/* DIAGNOSTIC: Always return IDLE - never dispatch */
 static int32_t ppa_dispatch(lv_draw_unit_t * draw_unit, lv_layer_t * layer)
 {
-    lv_draw_ppa_unit_t * u = (lv_draw_ppa_unit_t *)draw_unit;
-    if(u->task_act) {
-        return LV_DRAW_UNIT_IDLE;
-    }
-
-    lv_draw_task_t * t = lv_draw_get_available_task(layer, NULL, DRAW_UNIT_ID_PPA);
-    if(!t || t->preferred_draw_unit_id != DRAW_UNIT_ID_PPA) return LV_DRAW_UNIT_IDLE;
-    if(lv_draw_layer_alloc_buf(layer) == NULL) return LV_DRAW_UNIT_IDLE;
-
-    t->state = LV_DRAW_TASK_STATE_IN_PROGRESS;
-    u->task_act = t;
-
-    ppa_execute_drawing(u);
-
-    u->task_act->state = LV_DRAW_TASK_STATE_FINISHED;
-    u->task_act = NULL;
-    lv_draw_dispatch_request();
-
-    return 1;
+    LV_UNUSED(draw_unit);
+    LV_UNUSED(layer);
+    return LV_DRAW_UNIT_IDLE;
 }
 
 static int32_t ppa_delete(lv_draw_unit_t * draw_unit)
 {
     LV_UNUSED(draw_unit);
     return 0;
-}
-
-static void ppa_execute_drawing(lv_draw_ppa_unit_t * u)
-{
-    lv_draw_task_t * t = u->task_act;
-    if(t == NULL || t->target_layer == NULL) return;
-
-    lv_layer_t * layer = t->target_layer;
-    lv_draw_buf_t * buf = layer->draw_buf;
-    if(buf == NULL || buf->data == NULL) return;
-
-    lv_area_t area;
-    if(!lv_area_intersect(&area, &t->area, &t->clip_area)) return;
-
-    /* Flush CPU cache to memory before PPA reads the buffer */
-    lv_draw_ppa_cache_sync(buf);
-
-    switch(t->type) {
-        case LV_DRAW_TASK_TYPE_FILL:
-            lv_draw_ppa_fill(t, (lv_draw_fill_dsc_t *)t->draw_dsc, &area);
-            break;
-        case LV_DRAW_TASK_TYPE_IMAGE:
-            lv_draw_ppa_img(t, (lv_draw_image_dsc_t *)t->draw_dsc, &area);
-            break;
-        default:
-            break;
-    }
-
-    /* Flush after PPA wrote to the buffer */
-    lv_draw_ppa_cache_sync(buf);
 }
 
 #endif /* CONFIG_SOC_PPA_SUPPORTED */
