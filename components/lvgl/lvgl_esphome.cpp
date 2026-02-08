@@ -6,6 +6,12 @@
 
 #include "core/lv_obj_class_private.h"
 
+#ifdef USE_LVGL_PPA
+extern "C" {
+void lv_draw_ppa_init(void);
+}
+#endif
+
 #include <cstring>
 #include <numeric>
 
@@ -129,6 +135,12 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
 
 void LvglComponent::esphome_lvgl_init() {
   lv_init();
+#ifdef USE_LVGL_PPA
+  // Initialize PPA draw unit after lv_init()
+  // Uses fixed PPA code (backport of https://github.com/lvgl/lvgl/pull/9162)
+  // instead of the buggy LVGL 9.4 PPA code
+  lv_draw_ppa_init();
+#endif
   lv_tick_set_cb([] { return millis(); });
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());

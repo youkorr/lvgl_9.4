@@ -88,6 +88,7 @@ DEPENDENCIES = ["display"]
 AUTO_LOAD = ["key_provider", "button"]
 CODEOWNERS = ["@youkorr"]  # LVGL 9.4.0 implementation with ThorVG enabled by default
 HELLO_WORLD_FILE = "hello_world.yaml"
+CONF_USE_PPA = "use_ppa"
 
 
 SIMPLE_TRIGGERS = (
@@ -217,13 +218,21 @@ async def to_code(configs):
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
     # Memory alignment configuration for LVGL 9.4
-    # These are the official LVGL defaults. Setting higher values causes warnings
-    # from LVGL's internal stack/static buffers that can't meet stricter alignment.
-    # Our custom lv_malloc_core() always uses 64-byte alignment on ESP32 for
-    # optimal PSRAM/cache performance, regardless of these settings.
-    # See: https://github.com/lvgl/lvgl/blob/master/lv_conf_template.h
     df.add_define("LV_DRAW_BUF_STRIDE_ALIGN", "1")  # LVGL default
-    df.add_define("LV_DRAW_BUF_ALIGN", "4")  # LVGL default
+    # Keep LV_DRAW_BUF_ALIGN at LVGL default (4). Setting higher values
+    # causes crashes because LVGL's internal stack/static buffers can't meet
+    # stricter alignment. The custom lv_malloc_core() already provides 64-byte
+    # aligned heap allocations for the actual draw buffers on ESP32.
+    df.add_define("LV_DRAW_BUF_ALIGN", "4")
+    use_ppa = config_0.get(CONF_USE_PPA, False)
+    if use_ppa:
+        # Do NOT set LV_USE_PPA=1 in lv_conf.h: the LVGL 9.4 PPA code is buggy.
+        # Instead we compile our own fixed PPA files (backport of PR #9162)
+        # and call lv_draw_ppa_init() from lvgl_esphome.cpp after lv_init().
+        # PPA evaluate checks buffer alignment at runtime before claiming tasks.
+        cg.add_define("USE_LVGL_PPA")
+        ppa_dir = Path(__file__).parent / "ppa"
+        cg.add_build_flag(f"-I{ppa_dir}")
     df.add_define("LV_USE_STDLIB_MALLOC", "LV_STDLIB_CUSTOM")
 
     # ============================================
@@ -493,6 +502,7 @@ LVGL_SCHEMA = cv.All(
                 cv.Optional(df.CONF_KEYPADS, default=None): KEYPADS_CONFIG,
                 cv.GenerateID(df.CONF_DEFAULT_GROUP): cv.declare_id(lv_group_t),
                 cv.Optional(df.CONF_RESUME_ON_INPUT, default=True): cv.boolean,
+                cv.Optional(CONF_USE_PPA, default=False): cv.boolean,
             }
         )
         .extend(DISP_BG_SCHEMA),
