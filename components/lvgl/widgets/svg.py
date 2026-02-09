@@ -16,15 +16,20 @@ Usage in ESPHome YAML:
     - svg:
         id: my_icon
         file: "icons/home.svg"     # Local file, embedded in firmware
-        # width/height auto-detected from viewBox; override if desired:
-        # width: 64
-        # height: 64
+        # width/height auto-detected from viewBox
 
     Method 2 - File on filesystem (SD card, LittleFS):
     - svg:
         id: my_icon
         src: "/sdcard/icons/home.svg"   # File path on ESP32 filesystem
         width: 64                       # Required (can't read at compile time)
+        height: 64
+
+    Method 3 - Embedded with resize (render at custom size for screen layout):
+    - svg:
+        id: my_icon
+        file: "icons/home.svg"     # Source viewBox is 512x512
+        width: 64                  # Render at 64x64 instead
         height: 64
 
 Note: ThorVG rendering requires a large stack (32 KB+). The rendering is
