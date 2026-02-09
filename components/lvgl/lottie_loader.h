@@ -9,15 +9,19 @@
 #include <cstring>
 #include <lvgl.h>
 
+// Access lv_lottie_t internals for safe re-initialisation on screen re-load.
+// Needed to null out the dangling anim pointer and to clear the ThorVG canvas
+// before re-pushing the paint.
+#include <src/widgets/lottie/lv_lottie_private.h>
+
 namespace esphome {
 namespace lvgl {
 
 static const char *const LOTTIE_TAG = "lottie";
 static constexpr size_t LOTTIE_TASK_STACK_SIZE = 64 * 1024;
 
-// Persistent context for each Lottie widget – tracks all PSRAM allocations
-// and the render task, so resources are freed on screen unload and
-// re-created on screen load.
+// Persistent context for each Lottie widget – tracks all PSRAM allocations,
+// the render task, and cached animation parameters for safe re-load.
 struct LottieContext {
     // --- Config (set once, never freed) ---
     lv_obj_t *obj;
@@ -29,6 +33,14 @@ struct LottieContext {
     uint32_t width;
     uint32_t height;
 
+    // --- Animation params (captured on first load, reused on re-loads) ---
+    lv_anim_exec_xcb_t exec_cb;
+    void *anim_var;
+    int32_t start_frame;
+    int32_t end_frame;
+    uint32_t duration_ms;
+    bool data_loaded;           // true after first successful parse
+
     // --- Runtime state (freed on screen unload) ---
     uint8_t *pixel_buffer;      // PSRAM – width*height*4
     StackType_t *task_stack;    // PSRAM – 64 KB
@@ -38,9 +50,14 @@ struct LottieContext {
 };
 
 // --------------------------------------------------------------------------
-// Render task: loads Lottie data, captures LVGL animation parameters,
-// deletes the LVGL animation, and drives frame rendering on our 64 KB
-// PSRAM stack.  Checks stop_requested each frame; suspends when done.
+// Render task – runs on 64 KB PSRAM stack.
+//
+// First load:  set buffer → parse data → capture anim params → render loop
+// Re-load:     clear canvas → set buffer (no re-parse) → render loop
+//
+// lv_lottie_set_buffer() MUST be called from this task (not from an LVGL
+// event callback) because it internally triggers a ThorVG render that
+// needs the large stack.
 // --------------------------------------------------------------------------
 inline void lottie_load_task(void *param) {
     LottieContext *ctx = (LottieContext *)param;
@@ -48,43 +65,68 @@ inline void lottie_load_task(void *param) {
     // Wait for LVGL to be fully running
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    ESP_LOGI(LOTTIE_TAG, "Loading lottie animation data...");
-
-    // --- PHASE 1: Load data (ThorVG JSON parsing – needs large stack) ---
     lv_lock();
 
-    if (ctx->data != nullptr) {
-        lv_lottie_set_src_data(ctx->obj, ctx->data, ctx->data_size);
-        ESP_LOGI(LOTTIE_TAG, "Data loaded from embedded source (%d bytes)", (int)ctx->data_size);
-    } else if (ctx->file_path != nullptr) {
-        lv_lottie_set_src_file(ctx->obj, ctx->file_path);
-        ESP_LOGI(LOTTIE_TAG, "Data loaded from file: %s", ctx->file_path);
-    }
+    if (!ctx->data_loaded) {
+        // ===== FIRST LOAD =====
+        ESP_LOGI(LOTTIE_TAG, "First load: parsing lottie data...");
 
-    // --- PHASE 2: Capture animation parameters ---
-    lv_anim_t *anim = lv_lottie_get_anim(ctx->obj);
+        // Set pixel buffer – this calls anim_exec_cb internally but since
+        // no data is loaded yet ThorVG has nothing to render (safe).
+        lv_lottie_set_buffer(ctx->obj, ctx->width, ctx->height, ctx->pixel_buffer);
 
-    lv_anim_exec_xcb_t exec_cb = nullptr;
-    void *anim_var = nullptr;
-    int32_t start_frame = 0;
-    int32_t end_frame = 0;
-    uint32_t duration_ms = 0;
+        // Parse lottie data (heavy ThorVG work – needs 64 KB stack)
+        if (ctx->data != nullptr) {
+            lv_lottie_set_src_data(ctx->obj, ctx->data, ctx->data_size);
+            ESP_LOGI(LOTTIE_TAG, "Data loaded from embedded source (%d bytes)", (int)ctx->data_size);
+        } else if (ctx->file_path != nullptr) {
+            lv_lottie_set_src_file(ctx->obj, ctx->file_path);
+            ESP_LOGI(LOTTIE_TAG, "Data loaded from file: %s", ctx->file_path);
+        }
 
-    if (anim != nullptr) {
-        exec_cb      = anim->exec_cb;
-        anim_var     = anim->var;
-        start_frame  = anim->start_value;
-        end_frame    = anim->end_value;
-        duration_ms  = (uint32_t)lv_anim_get_time(anim);
+        // Capture animation parameters before deleting the LVGL animation
+        lv_anim_t *anim = lv_lottie_get_anim(ctx->obj);
+        if (anim != nullptr) {
+            ctx->exec_cb     = anim->exec_cb;
+            ctx->anim_var    = anim->var;
+            ctx->start_frame = anim->start_value;
+            ctx->end_frame   = anim->end_value;
+            ctx->duration_ms = (uint32_t)lv_anim_get_time(anim);
 
-        ESP_LOGI(LOTTIE_TAG, "Anim: frames %d..%d, duration %u ms",
-                 (int)start_frame, (int)end_frame, (unsigned)duration_ms);
+            ESP_LOGI(LOTTIE_TAG, "Anim: frames %d..%d, duration %u ms",
+                     (int)ctx->start_frame, (int)ctx->end_frame, (unsigned)ctx->duration_ms);
 
-        // DELETE the LVGL animation – we drive rendering ourselves.
-        lv_anim_delete(anim_var, exec_cb);
-        ESP_LOGI(LOTTIE_TAG, "LVGL anim removed – rendering from PSRAM task");
+            // Delete the LVGL animation – we drive rendering ourselves
+            // from this PSRAM task instead of the main task (small stack).
+            lv_anim_delete(ctx->anim_var, ctx->exec_cb);
+
+            // CRITICAL: null out the dangling pointer in lv_lottie_t.
+            // Without this, anim_exec_cb (called by lv_lottie_set_buffer
+            // on re-load) would dereference freed memory.
+            lv_lottie_t *lottie = (lv_lottie_t *)ctx->obj;
+            lottie->anim = NULL;
+
+            ctx->data_loaded = true;
+            ESP_LOGI(LOTTIE_TAG, "LVGL anim removed – rendering from PSRAM task");
+        } else {
+            ESP_LOGE(LOTTIE_TAG, "Animation INVALID – parsing may have failed!");
+        }
     } else {
-        ESP_LOGE(LOTTIE_TAG, "Animation INVALID – parsing may have failed!");
+        // ===== RE-LOAD (screen came back) =====
+        // Data is already parsed in the lv_lottie widget.  We just need
+        // to point ThorVG + LVGL canvas at the new pixel buffer.
+        //
+        // tvg_canvas_clear removes the paint from the canvas without
+        // deleting it (false), so lv_lottie_set_buffer can push it again
+        // without a double-push.
+        ESP_LOGI(LOTTIE_TAG, "Re-load: updating buffer (no re-parse)");
+
+        lv_lottie_t *lottie = (lv_lottie_t *)ctx->obj;
+        tvg_canvas_clear(lottie->tvg_canvas, false);
+
+        // Safe to call: widget is hidden (lv_obj_is_visible → false)
+        // and lottie->anim is NULL (no dangling pointer access).
+        lv_lottie_set_buffer(ctx->obj, ctx->width, ctx->height, ctx->pixel_buffer);
     }
 
     // Show widget
@@ -92,8 +134,9 @@ inline void lottie_load_task(void *param) {
 
     lv_unlock();
 
-    // If parsing failed or auto_start is off, suspend
-    if (exec_cb == nullptr || duration_ms == 0 || end_frame <= start_frame) {
+    // Validate animation parameters
+    if (!ctx->data_loaded || ctx->exec_cb == nullptr ||
+        ctx->duration_ms == 0 || ctx->end_frame <= ctx->start_frame) {
         ESP_LOGW(LOTTIE_TAG, "No valid animation, task suspending");
         vTaskSuspend(NULL);
         return;
@@ -104,9 +147,9 @@ inline void lottie_load_task(void *param) {
         return;
     }
 
-    // --- PHASE 3: Frame render loop (64 KB PSRAM stack) ---
-    int32_t total_frames = end_frame - start_frame;
-    uint32_t frame_delay_ms = duration_ms / (uint32_t)total_frames;
+    // --- Frame render loop (64 KB PSRAM stack) ---
+    int32_t total_frames = ctx->end_frame - ctx->start_frame;
+    uint32_t frame_delay_ms = ctx->duration_ms / (uint32_t)total_frames;
     if (frame_delay_ms < 16)  frame_delay_ms = 16;
     if (frame_delay_ms > 100) frame_delay_ms = 100;
 
@@ -120,21 +163,21 @@ inline void lottie_load_task(void *param) {
 
         int32_t frame;
         if (ctx->loop) {
-            uint32_t phase = elapsed_ms % duration_ms;
-            frame = start_frame + (int32_t)((int64_t)total_frames * phase / duration_ms);
+            uint32_t phase = elapsed_ms % ctx->duration_ms;
+            frame = ctx->start_frame + (int32_t)((int64_t)total_frames * phase / ctx->duration_ms);
         } else {
-            if (elapsed_ms >= duration_ms) {
+            if (elapsed_ms >= ctx->duration_ms) {
                 lv_lock();
-                exec_cb(anim_var, end_frame);
+                ctx->exec_cb(ctx->anim_var, ctx->end_frame);
                 lv_unlock();
                 ESP_LOGI(LOTTIE_TAG, "Animation complete");
                 break;
             }
-            frame = start_frame + (int32_t)((int64_t)total_frames * elapsed_ms / duration_ms);
+            frame = ctx->start_frame + (int32_t)((int64_t)total_frames * elapsed_ms / ctx->duration_ms);
         }
 
         lv_lock();
-        exec_cb(anim_var, frame);
+        ctx->exec_cb(ctx->anim_var, frame);
         lv_unlock();
 
         vTaskDelay(pdMS_TO_TICKS(frame_delay_ms));
@@ -152,15 +195,7 @@ inline void lottie_load_task(void *param) {
 // Free all PSRAM/internal-RAM resources for one Lottie widget.
 // --------------------------------------------------------------------------
 inline void lottie_free_resources(LottieContext *ctx) {
-    // Signal the task to stop (in case it's still in the render loop)
     ctx->stop_requested = true;
-
-    // Brief yield to let the task see the flag and suspend
-    // (the task is either in vTaskDelay or blocked on lv_lock)
-    // Since we hold lv_lock here (called from LVGL event), the task
-    // will be blocked on lv_lock if it tries to acquire it.
-    // vTaskDelete is safe: the task is either suspended, in vTaskDelay,
-    // or blocked on lv_lock – none of these hold the lock.
     if (ctx->task_handle) {
         vTaskDelete(ctx->task_handle);
         ctx->task_handle = nullptr;
@@ -177,7 +212,8 @@ inline void lottie_free_resources(LottieContext *ctx) {
 
 // --------------------------------------------------------------------------
 // (Re-)allocate pixel buffer and launch the render task.
-// Must be called under lv_lock.
+// lv_lottie_set_buffer is NOT called here – it is called inside the task
+// because it triggers ThorVG rendering which needs the 64 KB stack.
 // --------------------------------------------------------------------------
 inline bool lottie_launch(LottieContext *ctx) {
     // Allocate pixel buffer in PSRAM
@@ -190,10 +226,7 @@ inline bool lottie_launch(LottieContext *ctx) {
     }
     memset(ctx->pixel_buffer, 0, buf_bytes);
 
-    // Re-set the Lottie buffer
-    lv_lottie_set_buffer(ctx->obj, ctx->width, ctx->height, ctx->pixel_buffer);
-
-    // Hide until data is loaded by the task
+    // Hide until the task sets the buffer and loads data
     lv_obj_add_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
 
     // Allocate task stack + TCB
