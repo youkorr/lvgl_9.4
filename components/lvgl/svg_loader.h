@@ -217,11 +217,41 @@ inline bool svg_launch(SvgContext *ctx) {
 }
 
 // --------------------------------------------------------------------------
-// Screen event callbacks – auto-free / auto-reload PSRAM
+// Screen event callbacks – two-phase unload to avoid drawing freed buffer
+// during screen transition animation.
+//
+//   SCREEN_UNLOAD_START  → stop task + hide widget (LVGL still draws screen)
+//   SCREEN_UNLOADED      → free PSRAM (screen no longer visible)
+//   SCREEN_LOADED        → re-allocate and re-launch
 // --------------------------------------------------------------------------
+inline void svg_screen_unload_start_cb(lv_event_t *e) {
+    SvgContext *ctx = (SvgContext *)lv_event_get_user_data(e);
+
+    // Stop the render task immediately
+    if (ctx->task_handle) {
+        vTaskDelete(ctx->task_handle);
+        ctx->task_handle = nullptr;
+    }
+
+    // Hide widget so LVGL won't try to draw the canvas during transition
+    lv_obj_add_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);
+
+    ESP_LOGI(SVG_TAG, "SVG task stopped, widget hidden (transition starting)");
+}
+
 inline void svg_screen_unloaded_cb(lv_event_t *e) {
     SvgContext *ctx = (SvgContext *)lv_event_get_user_data(e);
-    svg_free_resources(ctx);
+
+    // Now safe to free – screen is no longer visible
+    if (ctx->task_stack)   { heap_caps_free(ctx->task_stack);   ctx->task_stack = nullptr; }
+    if (ctx->task_tcb)     { heap_caps_free(ctx->task_tcb);     ctx->task_tcb = nullptr; }
+    if (ctx->pixel_buffer) { heap_caps_free(ctx->pixel_buffer); ctx->pixel_buffer = nullptr; }
+    if (ctx->draw_buf)     { heap_caps_free(ctx->draw_buf);     ctx->draw_buf = nullptr; }
+    ctx->task_done = false;
+
+    ESP_LOGI(SVG_TAG, "SVG PSRAM freed (%ux%u = %u KB)",
+             (unsigned)ctx->width, (unsigned)ctx->height,
+             (unsigned)(ctx->width * ctx->height * 4 / 1024));
 }
 
 inline void svg_screen_loaded_cb(lv_event_t *e) {
@@ -251,8 +281,10 @@ inline bool svg_setup_and_render(lv_obj_t *canvas_obj,
 
     // Register screen events for PSRAM lifecycle
     lv_obj_t *screen = lv_obj_get_screen(canvas_obj);
-    lv_obj_add_event_cb(screen, svg_screen_unloaded_cb,
+    lv_obj_add_event_cb(screen, svg_screen_unload_start_cb,
                         LV_EVENT_SCREEN_UNLOAD_START, ctx);
+    lv_obj_add_event_cb(screen, svg_screen_unloaded_cb,
+                        LV_EVENT_SCREEN_UNLOADED, ctx);
     lv_obj_add_event_cb(screen, svg_screen_loaded_cb,
                         LV_EVENT_SCREEN_LOADED, ctx);
 
@@ -278,8 +310,10 @@ inline bool svg_setup_and_render_file(lv_obj_t *canvas_obj,
     ctx->height        = height;
 
     lv_obj_t *screen = lv_obj_get_screen(canvas_obj);
-    lv_obj_add_event_cb(screen, svg_screen_unloaded_cb,
+    lv_obj_add_event_cb(screen, svg_screen_unload_start_cb,
                         LV_EVENT_SCREEN_UNLOAD_START, ctx);
+    lv_obj_add_event_cb(screen, svg_screen_unloaded_cb,
+                        LV_EVENT_SCREEN_UNLOADED, ctx);
     lv_obj_add_event_cb(screen, svg_screen_loaded_cb,
                         LV_EVENT_SCREEN_LOADED, ctx);
 

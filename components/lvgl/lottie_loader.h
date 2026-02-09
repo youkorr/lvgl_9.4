@@ -224,11 +224,41 @@ inline bool lottie_launch(LottieContext *ctx) {
 }
 
 // --------------------------------------------------------------------------
-// Screen event callbacks – auto-free / auto-reload PSRAM
+// Screen event callbacks – two-phase unload to avoid drawing freed buffer
+// during screen transition animation.
+//
+//   SCREEN_UNLOAD_START  → stop task + hide widget (LVGL still draws screen)
+//   SCREEN_UNLOADED      → free PSRAM (screen no longer visible)
+//   SCREEN_LOADED        → re-allocate and re-launch
 // --------------------------------------------------------------------------
+inline void lottie_screen_unload_start_cb(lv_event_t *e) {
+    LottieContext *ctx = (LottieContext *)lv_event_get_user_data(e);
+
+    // Stop the render task immediately
+    ctx->stop_requested = true;
+    if (ctx->task_handle) {
+        vTaskDelete(ctx->task_handle);
+        ctx->task_handle = nullptr;
+    }
+
+    // Hide widget so LVGL won't try to draw the image during transition
+    lv_obj_add_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+
+    ESP_LOGI(LOTTIE_TAG, "Lottie task stopped, widget hidden (transition starting)");
+}
+
 inline void lottie_screen_unloaded_cb(lv_event_t *e) {
     LottieContext *ctx = (LottieContext *)lv_event_get_user_data(e);
-    lottie_free_resources(ctx);
+
+    // Now safe to free – screen is no longer visible
+    if (ctx->task_stack)    { heap_caps_free(ctx->task_stack);    ctx->task_stack = nullptr; }
+    if (ctx->task_tcb)      { heap_caps_free(ctx->task_tcb);      ctx->task_tcb = nullptr; }
+    if (ctx->pixel_buffer)  { heap_caps_free(ctx->pixel_buffer);  ctx->pixel_buffer = nullptr; }
+    ctx->stop_requested = false;
+
+    ESP_LOGI(LOTTIE_TAG, "Lottie PSRAM freed (%ux%u = %u KB + 64 KB stack)",
+             (unsigned)ctx->width, (unsigned)ctx->height,
+             (unsigned)(ctx->width * ctx->height * 4 / 1024));
 }
 
 inline void lottie_screen_loaded_cb(lv_event_t *e) {
@@ -260,10 +290,12 @@ inline bool lottie_init(lv_obj_t *obj, const void *data, size_t data_size,
     ctx->width     = width;
     ctx->height    = height;
 
-    // Register screen events for PSRAM lifecycle
+    // Register screen events for PSRAM lifecycle (two-phase unload)
     lv_obj_t *screen = lv_obj_get_screen(obj);
-    lv_obj_add_event_cb(screen, lottie_screen_unloaded_cb,
+    lv_obj_add_event_cb(screen, lottie_screen_unload_start_cb,
                         LV_EVENT_SCREEN_UNLOAD_START, ctx);
+    lv_obj_add_event_cb(screen, lottie_screen_unloaded_cb,
+                        LV_EVENT_SCREEN_UNLOADED, ctx);
     lv_obj_add_event_cb(screen, lottie_screen_loaded_cb,
                         LV_EVENT_SCREEN_LOADED, ctx);
 
