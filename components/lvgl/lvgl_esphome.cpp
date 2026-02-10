@@ -199,66 +199,101 @@ size_t LvglComponent::get_current_page() const { return this->current_page_; }
 bool LvPageType::is_showing() const { return this->parent_->get_current_page() == this->index; }
 
 void LvglComponent::draw_buffer_(const lv_area_t *area, lv_color_data *ptr) {
-
+    /* --------------------------------------------------------------
+     * 1️⃣  Coordonnées et dimensions brutes du rectangle LVGL
+     * -------------------------------------------------------------- */
     int x1 = area->x1;
     int y1 = area->y1;
     int width  = lv_area_get_width(area);
     int height = lv_area_get_height(area);
 
-    int w_rounded = (width  + this->draw_rounding - 1) / this->draw_rounding *
-                    this->draw_rounding;
-    int h_rounded = (height + this->draw_rounding - 1) / this->draw_rounding *
-                    this->draw_rounding;
+    /* --------------------------------------------------------------
+     * 2️⃣  Dimensions arrondies (draw_rounding)
+     * -------------------------------------------------------------- */
+    int w_rounded = (width  + this->draw_rounding - 1) /
+                    this->draw_rounding * this->draw_rounding;
+    int h_rounded = (height + this->draw_rounding - 1) /
+                    this->draw_rounding * this->draw_rounding;
 
+    /* --------------------------------------------------------------
+     * 3️⃣  Destination du buffer (rotatif ou direct)
+     * -------------------------------------------------------------- */
     lv_color_data *dst = reinterpret_cast<lv_color_data *>(this->rotate_buf_);
 
+    /* --------------------------------------------------------------
+     * 4️⃣  Traitement selon la rotation demandée
+     * -------------------------------------------------------------- */
     if (this->rotation == display::DISPLAY_ROTATION_0_DEGREES) {
-        dst = ptr;                                    // aucune rotation
+        /* Aucun traitement – on transmet le buffer tel quel */
+        dst = ptr;
     }
     /* -------------------- 90° -------------------- */
     else if (this->rotation == display::DISPLAY_ROTATION_90_DEGREES) {
+        /* (x,y) → (y, height‑x‑1) */
         for (int y = 0; y < width; ++y) {
             for (int x = height; x-- != 0;) {
                 dst[y * h_rounded + x] = *ptr++;
             }
         }
-        int new_x1 = area->y1;
-        int new_y1 = this->width_ - area->x1 - width;
+
+        /* Nouvelles coordonnées du coin supérieur‑gauche */
+        int new_x1 = area->y1;                                      // ancien Y devient X
+        int new_y1 = this->width_ - area->x1 - width;               // calcul basé sur la largeur brute
         x1 = new_x1;
         y1 = new_y1;
-        width  = height;      // largeur = ancienne hauteur
-        height = width;       // hauteur = ancienne largeur (temporaire)
-        width  = h_rounded;   // appliquer l’arrondi
+
+        /* Dimensions après rotation (avant arrondi) */
+        int new_width  = height;   // largeur = ancienne hauteur
+        int new_height = width;    // hauteur = ancienne largeur
+
+        /* Application de l’arrondi */
+        width  = h_rounded;       // largeur arrondie
+        height = w_rounded;       // hauteur arrondie
     }
     /* -------------------- 180° -------------------- */
     else if (this->rotation == display::DISPLAY_ROTATION_180_DEGREES) {
+        /* (x,y) → (width‑x‑1, height‑y‑1) */
         for (int y = height; y-- != 0;) {
             for (int x = width; x-- != 0;) {
                 dst[y * width + x] = *ptr++;
             }
         }
-        x1 = this->width_  - area->x1 - width;
-        y1 = this->height_ - area->y1 - height;
-        width  = w_rounded;
-        height = h_rounded;
+
+        /* Nouvelles coordonnées du coin supérieur‑gauche */
+        x1 = this->width_  - area->x1 - width;   // largeur brute
+        y1 = this->height_ - area->y1 - height;  // hauteur brute
+
+        /* Dimensions après rotation (elles restent les mêmes) */
+        width  = w_rounded;   // largeur arrondie
+        height = h_rounded;   // hauteur arrondie
     }
     /* -------------------- 270° -------------------- */
     else if (this->rotation == display::DISPLAY_ROTATION_270_DEGREES) {
+        /* (x,y) → (width‑y‑1, x) */
         for (int x = 0; x != height; ++x) {          // x parcourt l’ancienne hauteur
             for (int y = width; y-- != 0;) {          // y parcourt l’ancienne largeur à rebours
                 dst[y * h_rounded + x] = *ptr++;
             }
         }
+
+        /* Nouvelles coordonnées du coin supérieur‑gauche */
         int new_x1 = area->y1;
         int new_y1 = this->width_ - area->x1 - width;
         x1 = new_x1;
         y1 = new_y1;
-        width  = height;      // largeur = ancienne hauteur (non arrondie)
-        height = width;       // hauteur = ancienne largeur (temporaire)
-        width  = h_rounded;   // largeur arrondie
-        height = w_rounded;   // hauteur arrondie (symétrique à 90°/180°)
+
+        /* Dimensions après rotation (avant arrondi) */
+        int new_width  = height;   // largeur = ancienne hauteur
+        int new_height = width;    // hauteur = ancienne largeur
+
+        /* Application de l’arrondi */
+        width  = h_rounded;       // largeur arrondie
+        height = w_rounded;       // hauteur arrondie
     }
 
+    /* --------------------------------------------------------------
+     * 5️⃣  Envoi du buffer au driver d’affichage
+     * -------------------------------------------------------------- */
     for (auto *display : this->displays_) {
         display->draw_pixels_at(
             x1,
