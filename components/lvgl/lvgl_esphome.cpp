@@ -199,56 +199,84 @@ size_t LvglComponent::get_current_page() const { return this->current_page_; }
 bool LvPageType::is_showing() const { return this->parent_->get_current_page() == this->index; }
 
 void LvglComponent::draw_buffer_(const lv_area_t *area, lv_color_data *ptr) {
-  auto width = lv_area_get_width(area);
-  auto height = lv_area_get_height(area);
-  auto height_rounded = (height + this->draw_rounding - 1) / this->draw_rounding * this->draw_rounding;
-  auto x1 = area->x1;
-  auto y1 = area->y1;
-  lv_color_data *dst = reinterpret_cast<lv_color_data *>(this->rotate_buf_);
-  switch (this->rotation) {
-    case display::DISPLAY_ROTATION_90_DEGREES:
-      for (lv_coord_t x = height; x-- != 0;) {
-        for (lv_coord_t y = 0; y != width; y++) {
-          dst[y * height_rounded + x] = *ptr++;
-        }
-      }
-      y1 = x1;
-      x1 = this->height_ - area->y1 - height;
-      width = height;
-      height = width;
-      width = height_rounded;
-      break;
+    auto orig_w = lv_area_get_width(area);
+    auto orig_h = lv_area_get_height(area);
 
-    case display::DISPLAY_ROTATION_180_DEGREES:
-      for (lv_coord_t y = height; y-- != 0;) {
-        for (lv_coord_t x = width; x-- != 0;) {
-          dst[y * width + x] = *ptr++;
-        }
-      }
-      x1 = this->width_ - x1 - width;
-      y1 = this->height_ - y1 - height;
-      break;
+    // Arrondi individuel – on garde le même facteur que celui utilisé pour le buffer
+    auto w_rounded = (orig_w + this->draw_rounding - 1) / this->draw_rounding *
+                     this->draw_rounding;
+    auto h_rounded = (orig_h + this->draw_rounding - 1) / this->draw_rounding *
+                     this->draw_rounding;
 
-    case display::DISPLAY_ROTATION_270_DEGREES:
-      for (lv_coord_t x = 0; x != height; x++) {
-        for (lv_coord_t y = width; y-- != 0;) {
-          dst[y * height_rounded + x] = *ptr++;
-        }
-      }
-      x1 = y1;
-      y1 = this->width_ - area->x1 - width;
-      height = width;
-      width = height_rounded;
-      break;
+    lv_color_data *dst = reinterpret_cast<lv_color_data *>(this->rotate_buf_);
 
-    default:
-      dst = ptr;
-      break;
-  }
-  for (auto *display : this->displays_) {
-    display->draw_pixels_at(x1, y1, width, height, (const uint8_t *) dst, display::COLOR_ORDER_RGB, LV_BITNESS,
-                            this->big_endian_);
-  }
+    // -----------------------------------------------------------------
+    // 0° (pas de rotation)
+    // -----------------------------------------------------------------
+    if (this->rotation == display::DISPLAY_ROTATION_0_DEGREES) {
+        dst = ptr;
+        // coordonnées restent inchangées
+    }
+    // -----------------------------------------------------------------
+    // 90° clockwise
+    // -----------------------------------------------------------------
+    else if (this->rotation == display::DISPLAY_ROTATION_90_DEGREES) {
+        for (lv_coord_t y = 0; y < orig_w; ++y) {
+            for (lv_coord_t x = orig_h; x-- != 0;) {
+                dst[y * h_rounded + x] = *ptr++;
+            }
+        }
+        lv_coord_t new_x1 = area->y1;
+        lv_coord_t new_y1 = this->width_ - area->x1 - orig_w;
+        x1 = new_x1;
+        y1 = new_y1;
+        width  = orig_h;   // largeur = ancienne hauteur
+        height = orig_w;   // hauteur = ancienne largeur
+        width = h_rounded; // appliquer l’arrondi
+    }
+    // -----------------------------------------------------------------
+    // 180°
+    // -----------------------------------------------------------------
+    else if (this->rotation == display::DISPLAY_ROTATION_180_DEGREES) {
+        for (lv_coord_t y = orig_h; y-- != 0;) {
+            for (lv_coord_t x = orig_w; x-- != 0;) {
+                dst[y * orig_w + x] = *ptr++;
+            }
+        }
+        x1 = this->width_  - area->x1 - orig_w;
+        y1 = this->height_ - area->y1 - orig_h;
+        width  = w_rounded;
+        height = h_rounded;
+    }
+    // -----------------------------------------------------------------
+    // 270° clockwise (déjà correct)
+    // -----------------------------------------------------------------
+    else if (this->rotation == display::DISPLAY_ROTATION_270_DEGREES) {
+        for (lv_coord_t x = 0; x != orig_h; ++x) {
+            for (lv_coord_t y = orig_w; y-- != 0;) {
+                dst[y * h_rounded + x] = *ptr++;
+            }
+        }
+        x1 = area->y1;
+        y1 = this->width_ - area->x1 - orig_w;
+        width  = orig_h;
+        height = orig_w;
+        width = h_rounded;
+    }
+
+    // ---------------------------------------------------------------
+    // Envoi du buffer au driver d’affichage (identique pour toutes les rotations)
+    // ---------------------------------------------------------------
+    for (auto *display : this->displays_) {
+        display->draw_pixels_at(x1,
+                               y1,
+                               width,
+                               height,
+                               reinterpret_cast<const uint8_t *>(dst),
+                               display::COLOR_ORDER_RGB,
+                               LV_BITNESS,
+                               this->big_endian_);
+    }
 }
 
 void LvglComponent::flush_cb_(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *color_p) {
