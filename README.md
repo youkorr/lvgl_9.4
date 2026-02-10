@@ -11,15 +11,7 @@ Ce guide documente **tous les 35 widgets** disponibles dans l'implémentation LV
 - [Widgets Avancés](#widgets-avancés)
 
 ---
-https://github.com/user-attachments/assets/f0c77033-1ffc-4adc-8356-ef7a395cf937
 
-
-
-https://github.com/user-attachments/assets/3659d927-773e-4027-8fb7-dfcd0bbd45ff
-
-
-
-https://github.com/user-attachments/assets/3e11ce89-703e-47de-900c-71ed18cbb973
 
 
 ## Widgets de Base
@@ -553,6 +545,11 @@ lvgl:
           - id: temp_series
             color: 0xFF0000
             width: 2
+     
+
+https://github.com/user-attachments/assets/eae845be-39b5-4720-99c1-8dc9ea450325
+
+       
 ```
 
 **Types de graphiques**:
@@ -634,6 +631,14 @@ lvgl:
         y: 100
         width: 200
         height: 200       
+
+
+https://github.com/user-attachments/assets/dd3a0b52-e08e-43e7-96a6-0832b0d8e7b6
+
+
+
+https://github.com/user-attachments/assets/bb6d13d2-5ff4-4955-af02-e9d759e63f2f
+
 
 ```
 
