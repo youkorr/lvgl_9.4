@@ -558,9 +558,10 @@ void LvglComponent::setup() {
     frac = 1;
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
-  // CRITICAL: Always use lv_malloc_core() which guarantees 64-byte alignment
-  // Don't use malloc() as it may not be aligned correctly for LVGL 9.4
-  buffer = lv_malloc_core(buf_bytes);  // NOLINT
+  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
+    buffer = malloc(buf_bytes);  // NOLINT
+  if (buffer == nullptr)
+    buffer = lv_malloc_core(buf_bytes);  // NOLINT
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
     frac = MIN_BUFFER_FRAC;
@@ -576,13 +577,11 @@ void LvglComponent::setup() {
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
   lv_display_set_resolution(this->disp_, this->width_, this->height_);
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
-  // CRITICAL: Set user_data BEFORE flush_cb, as flush_cb uses user_data
-  lv_display_set_user_data(this->disp_, this);
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
+  lv_display_set_user_data(this->disp_, this);
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
-  // CRITICAL FIX: Do NOT call lv_display_set_buffers() here!
-  // It can trigger immediate rendering which deadlocks because loop() hasn't started yet.
-  // Store buf_bytes for delayed configuration in loop()
+  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
+                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
