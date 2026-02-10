@@ -29,6 +29,15 @@ Usage in ESPHome YAML:
         loop: true                       # width/height auto-detected from JSON
         auto_start: true
 
+    Method 3 - Embedded with resize (render at custom size for screen layout):
+    - lottie:
+        id: my_animation
+        file: "animations/loading.json"  # Source is 300x300 in JSON
+        width: 150                       # Render at 150x150 instead
+        height: 150
+        loop: true
+        auto_start: true
+
 Actions:
     - lvgl.lottie.start: my_animation
     - lvgl.lottie.stop: my_animation
@@ -104,7 +113,7 @@ def validate_lottie_source(config):
         if CONF_WIDTH not in config or CONF_HEIGHT not in config:
             raise cv.Invalid("'width' and 'height' are required when using 'src' (filesystem path). Cannot auto-detect dimensions at compile time.")
 
-    # For file method, auto-detect dimensions from JSON
+    # For file method, auto-detect dimensions from JSON (unless user specified width/height for resize)
     if has_file:
         file_path = config[CONF_FILE]
         try:
@@ -115,9 +124,11 @@ def validate_lottie_source(config):
                 lottie_height = lottie_data.get("h")
                 if lottie_width is None or lottie_height is None:
                     raise cv.Invalid(f"Lottie JSON file missing 'w' or 'h' dimensions: {file_path}")
-                # Store extracted dimensions
-                config[CONF_LOTTIE_WIDTH] = int(lottie_width)
-                config[CONF_LOTTIE_HEIGHT] = int(lottie_height)
+                # Only use auto-detected dimensions if user didn't specify custom size
+                if CONF_WIDTH not in config or CONF_HEIGHT not in config:
+                    config[CONF_LOTTIE_WIDTH] = int(lottie_width)
+                    config[CONF_LOTTIE_HEIGHT] = int(lottie_height)
+                # else: user specified width/height for resize – those will be used
         except json.JSONDecodeError as e:
             raise cv.Invalid(f"Invalid JSON in Lottie file {file_path}: {e}")
         except Exception as e:
@@ -168,8 +179,11 @@ class LottieType(WidgetType):
 
         from ..lvcode import lv_obj, lv_add
 
-        # Get dimensions - either from config or auto-detected from JSON
-        if CONF_LOTTIE_WIDTH in config:
+        # Get dimensions - user-specified override auto-detected from JSON
+        if CONF_WIDTH in config and CONF_HEIGHT in config:
+            width = config[CONF_WIDTH]
+            height = config[CONF_HEIGHT]
+        elif CONF_LOTTIE_WIDTH in config:
             width = config[CONF_LOTTIE_WIDTH]
             height = config[CONF_LOTTIE_HEIGHT]
         else:
@@ -180,10 +194,6 @@ class LottieType(WidgetType):
         lv_obj.set_size(w.obj, width, height)
 
         # CRITICAL: Hide widget until data is loaded.
-        # The LVGL lottie constructor starts the animation immediately.
-        # anim_exec_cb calls lottie_update which runs ThorVG canvas draw/sync.
-        # Without loaded picture data, ThorVG can crash on ESP32-P4.
-        # The loader task will remove HIDDEN flag after data is loaded.
         lv_obj.add_flag(w.obj, literal("LV_OBJ_FLAG_HIDDEN"))
 
         # Add include for lottie loader helper (once)
@@ -191,26 +201,15 @@ class LottieType(WidgetType):
             _lottie_include_added = True
             cg.add_global(cg.RawStatement('#include "esphome/components/lvgl/lottie_loader.h"'))
 
-        # Create unique buffer name using widget id
-        widget_id = str(w.obj).replace("->", "_").replace(".", "_")
-        buf_name = f"lottie_buf_{widget_id}"
+        # Get loop and auto_start config
+        do_loop = "true" if config.get(CONF_LOOP, True) else "false"
+        do_auto_start = "true" if config.get(CONF_AUTO_START, True) else "false"
 
-        # Declare static buffer pointer
-        buf_size = width * height * 4
-        cg.add_global(cg.RawExpression(f"static uint8_t *{buf_name} = nullptr"))
-
-        # Allocate buffer in PSRAM and set it FIRST (before data loading)
-        # This ensures LVGL has a valid buffer even before animation data is loaded
+        # Use lottie_init() which handles PSRAM allocation, screen events, and task launch
         if src := config.get(CONF_SRC):
             # File from filesystem
             lv_add(cg.RawStatement(f"""
-    {buf_name} = (uint8_t *)heap_caps_malloc({buf_size}, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if ({buf_name} != nullptr) {{
-        lv_lottie_set_buffer({w.obj}, {width}, {height}, {buf_name});
-        esphome::lvgl::lottie_load_async({w.obj}, nullptr, 0, "{src}");
-    }} else {{
-        ESP_LOGE("lottie", "Failed to allocate lottie buffer in PSRAM");
-    }}"""))
+    esphome::lvgl::lottie_init({w.obj}, nullptr, 0, "{src}", {width}, {height}, {do_loop}, {do_auto_start});"""))
         elif file_path := config.get(CONF_FILE):
             # Embedded data
             with open(file_path, "rb") as f:
@@ -223,13 +222,7 @@ class LottieType(WidgetType):
             prog_arr = cg.progmem_array(raw_data_id, list(json_data_with_null))
 
             lv_add(cg.RawStatement(f"""
-    {buf_name} = (uint8_t *)heap_caps_malloc({buf_size}, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if ({buf_name} != nullptr) {{
-        lv_lottie_set_buffer({w.obj}, {width}, {height}, {buf_name});
-        esphome::lvgl::lottie_load_async({w.obj}, {prog_arr}, {len(json_data)}, nullptr);
-    }} else {{
-        ESP_LOGE("lottie", "Failed to allocate lottie buffer in PSRAM");
-    }}"""))
+    esphome::lvgl::lottie_init({w.obj}, {prog_arr}, {len(json_data)}, nullptr, {width}, {height}, {do_loop}, {do_auto_start});"""))
 
 
 lottie_spec = LottieType()
