@@ -142,6 +142,16 @@ inline void lottie_load_task(void *param) {
                 ctx->is_paused = true;
                 ESP_LOGI(LOTTIE_TAG, "Animation paused (widget hidden)");
             }
+
+            // If hidden for more than 2 seconds, free memory and stop task
+            // This allows lazy-loaded weather widgets to be unloaded when not visible
+            TickType_t hidden_duration = xTaskGetTickCount() - pause_start_tick;
+            if (hidden_duration > pdMS_TO_TICKS(2000)) {
+                ESP_LOGI(LOTTIE_TAG, "Widget hidden for 2s, freeing memory and stopping task");
+                ctx->stop_requested = true;
+                break;
+            }
+
             // Sleep longer while paused to save CPU
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
@@ -188,6 +198,9 @@ inline void lottie_load_task(void *param) {
     }
 
     ESP_LOGI(LOTTIE_TAG, "Task exiting cleanly");
+
+    // Free resources before exiting (e.g., if hidden for 2s)
+    lottie_free_resources(ctx);
 
     ctx->task_handle = nullptr;
     vTaskDelete(NULL);
@@ -318,28 +331,15 @@ inline void lottie_widget_draw_cb(lv_event_t *e) {
     LottieContext *ctx =
         (LottieContext *)lv_event_get_user_data(e);
 
-    // If widget is being drawn but resources are not allocated (lazy loading)
-    // This happens when a hidden widget becomes visible after screen reload
-    if (ctx->pixel_buffer == nullptr && !lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN)) {
-        ESP_LOGI(LOTTIE_TAG, "Lazy loading widget (became visible after reload)");
-        lottie_launch(ctx);
-    }
-}
-
-inline void lottie_widget_visibility_cb(lv_event_t *e) {
-    LottieContext *ctx =
-        (LottieContext *)lv_event_get_user_data(e);
-
-    // Check if widget just became visible but resources are not allocated
-    // This handles the case where widget becomes visible AFTER page reload
-    // (e.g., weather condition changes and hidden Lottie needs to show)
-    if (ctx->pixel_buffer == nullptr &&
-        ctx->task_handle == nullptr &&
-        !lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN)) {
+    // LV_EVENT_DRAW_MAIN_BEGIN is ONLY called when widget is visible (not hidden)
+    // If we reach here and buffer is null, it means widget just became visible
+    // This handles lazy loading for hidden weather widgets that become visible
+    if (ctx->pixel_buffer == nullptr && ctx->task_handle == nullptr) {
         ESP_LOGI(LOTTIE_TAG, "Widget became visible, lazy loading now");
         lottie_launch(ctx);
     }
 }
+
 
 
 
@@ -397,14 +397,6 @@ inline bool lottie_init(lv_obj_t *obj,
     lv_obj_add_event_cb(obj,
                         lottie_widget_draw_cb,
                         LV_EVENT_DRAW_MAIN_BEGIN,
-                        ctx);
-
-    // Add visibility check callback to detect when hidden widgets become visible
-    // This uses COVER_CHECK which is called during layout/rendering even for hidden objects
-    // allowing us to detect visibility changes (e.g., weather condition changing)
-    lv_obj_add_event_cb(obj,
-                        lottie_widget_visibility_cb,
-                        LV_EVENT_COVER_CHECK,
                         ctx);
 
     return lottie_launch(ctx);
