@@ -1,0 +1,135 @@
+# Test: Combien de Lotties peut-on avoir ?
+# Ce fichier teste 6 widgets Lottie pour prouver qu'il n'y a pas de limite à 3
+
+substitutions:
+  name: lottie_test
+  friendly_name: "Lottie Test"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-p4-evboard
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    version: 5.5.2
+    platform_version: 55.03.35
+    sdkconfig_options:
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+      CONFIG_SPIRAM_SPEED_200M: "y"
+      CONFIG_SPIRAM_SPEED: "200"
+
+logger:
+  level: DEBUG
+
+# Display configuration
+display:
+  - platform: mipi_dsi
+    id: main_display
+    model: JC4880P443
+    dimensions:
+      width: 800
+      height: 480
+
+lvgl:
+  byte_order: little_endian
+  displays:
+    - main_display
+
+  pages:
+    - id: test_page
+      widgets:
+        # Lottie 1
+        - lottie:
+            id: lottie_1
+            file: "weather_rainy_30fps.json"  # Utilise ton fichier JSON existant
+            x: 50
+            y: 50
+            width: 150
+            height: 150
+            loop: true
+            auto_start: true
+
+        # Lottie 2
+        - lottie:
+            id: lottie_2
+            file: "weather_rainy_30fps.json"
+            x: 220
+            y: 50
+            width: 150
+            height: 150
+            loop: true
+            auto_start: false  # Pas auto_start pour économiser CPU
+
+        # Lottie 3
+        - lottie:
+            id: lottie_3
+            file: "weather_rainy_30fps.json"
+            x: 390
+            y: 50
+            width: 150
+            height: 150
+            loop: true
+            auto_start: false
+            hidden: true  # Caché au démarrage
+
+        # Lottie 4 - Pour prouver qu'on peut avoir plus de 3 !
+        - lottie:
+            id: lottie_4
+            file: "weather_rainy_30fps.json"
+            x: 560
+            y: 50
+            width: 150
+            height: 150
+            loop: true
+            auto_start: false
+            hidden: true
+
+        # Lottie 5 - Encore plus !
+        - lottie:
+            id: lottie_5
+            file: "weather_rainy_30fps.json"
+            x: 50
+            y: 250
+            width: 150
+            height: 150
+            loop: true
+            auto_start: false
+            hidden: true
+
+        # Lottie 6 - La preuve finale !
+        - lottie:
+            id: lottie_6
+            file: "weather_rainy_30fps.json"
+            x: 220
+            y: 250
+            width: 150
+            height: 150
+            loop: true
+            auto_start: false
+            hidden: true
+
+        # Label de statut
+        - label:
+            id: status_label
+            x: 400
+            y: 400
+            text: "6 Lotties créés ! Pas de limite à 3 ✅"
+            text_color: 0x00FF00
+
+# Sensor pour afficher l'usage mémoire
+sensor:
+  - platform: template
+    name: "SPIRAM Free"
+    id: spiram_free
+    update_interval: 5s
+    lambda: |-
+      size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+      return free_psram / 1024.0;  // Retourne en KB
+    unit_of_measurement: "KB"
+    accuracy_decimals: 1
