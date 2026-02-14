@@ -4,7 +4,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <cstring>
@@ -15,10 +14,7 @@ namespace esphome {
 namespace lvgl {
 
 static const char *const LOTTIE_TAG = "lottie";
-static constexpr size_t LOTTIE_TASK_STACK_SIZE = 96 * 1024;  // 96KB - balanced for rlottie parser without excessive memory
-
-// Global mutex to serialize Lottie JSON parsing (prevents simultaneous stack-heavy operations)
-static SemaphoreHandle_t lottie_parse_mutex = nullptr;
+static constexpr size_t LOTTIE_TASK_STACK_SIZE = 64 * 1024;  // 64KB - proven stable for multiple Lottie widgets
 
 struct LottieContext {
     lv_obj_t *obj;
@@ -57,19 +53,8 @@ inline bool lottie_launch(LottieContext *ctx);
 inline void lottie_load_task(void *param) {
     LottieContext *ctx = (LottieContext *)param;
 
+    // Wait for LVGL to be fully running
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // ⚠️ CRITICAL: Acquire mutex BEFORE parsing JSON to serialize stack-heavy operations
-    // This prevents multiple Lottie widgets from parsing simultaneously and causing stack overflow
-    // Use timeout to prevent infinite blocking if another task crashes while holding mutex
-    if (lottie_parse_mutex != nullptr) {
-        if (xSemaphoreTake(lottie_parse_mutex, pdMS_TO_TICKS(10000)) != pdTRUE) {
-            ESP_LOGE(LOTTIE_TAG, "Failed to acquire parse mutex (timeout 10s) - another task may have crashed");
-            ctx->task_handle = nullptr;
-            vTaskDelete(NULL);
-            return;
-        }
-    }
 
     lv_lock();
 
@@ -113,13 +98,6 @@ inline void lottie_load_task(void *param) {
     lv_obj_remove_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
 
     lv_unlock();
-
-    // Release mutex after JSON parsing is complete (allow next Lottie to parse)
-    if (lottie_parse_mutex != nullptr) {
-        xSemaphoreGive(lottie_parse_mutex);
-    }
-
-
 
     if (!ctx->data_loaded || ctx->exec_cb == nullptr ||
         ctx->duration_ms == 0 || ctx->end_frame <= ctx->start_frame) {
@@ -323,15 +301,6 @@ inline bool lottie_init(lv_obj_t *obj,
                         uint32_t height,
                         bool loop,
                         bool auto_start) {
-
-    // Initialize global mutex on first call (thread-safe singleton pattern)
-    if (lottie_parse_mutex == nullptr) {
-        lottie_parse_mutex = xSemaphoreCreateMutex();
-        if (lottie_parse_mutex == nullptr) {
-            ESP_LOGE(LOTTIE_TAG, "Failed to create parse mutex!");
-            return false;
-        }
-    }
 
     LottieContext *ctx =
         (LottieContext *)heap_caps_malloc(
