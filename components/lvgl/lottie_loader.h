@@ -229,10 +229,7 @@ inline bool lottie_launch(LottieContext *ctx) {
     }
     memset(ctx->pixel_buffer, 0, buf_bytes);
 
-    // Save user's 'hidden' configuration before temporarily hiding during load
-    ctx->user_wants_hidden = lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
-
-    // Hide until the task sets the buffer and loads data
+    // Hide temporarily during async load (user's config is already saved in ctx->user_wants_hidden)
     lv_obj_add_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
 
     // Allocate task stack + TCB
@@ -314,7 +311,7 @@ inline void lottie_screen_loaded_cb(lv_event_t *e) {
 // --------------------------------------------------------------------------
 inline bool lottie_init(lv_obj_t *obj, const void *data, size_t data_size,
                          const char *file_path, uint32_t width, uint32_t height,
-                         bool loop, bool auto_start) {
+                         bool loop, bool auto_start, bool user_wants_hidden) {
     LottieContext *ctx = (LottieContext *)heap_caps_malloc(
         sizeof(LottieContext), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!ctx) return false;
@@ -328,6 +325,7 @@ inline bool lottie_init(lv_obj_t *obj, const void *data, size_t data_size,
     ctx->auto_start = auto_start;
     ctx->width     = width;
     ctx->height    = height;
+    ctx->user_wants_hidden = user_wants_hidden;  // Save user's 'hidden' config from YAML
 
     // Register screen events for PSRAM lifecycle (two-phase unload)
     lv_obj_t *screen = lv_obj_get_screen(obj);

@@ -189,10 +189,7 @@ inline bool svg_launch(SvgContext *ctx) {
     lv_draw_buf_set_flag(ctx->draw_buf, LV_IMAGE_FLAGS_MODIFIABLE);
     lv_canvas_set_draw_buf(ctx->canvas_obj, ctx->draw_buf);
 
-    // Save user's 'hidden' configuration before temporarily hiding during render
-    ctx->user_wants_hidden = lv_obj_has_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);
-
-    // Hide until rendering finishes
+    // Hide temporarily during async render (user's config is already saved in ctx->user_wants_hidden)
     lv_obj_add_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);
 
     // Allocate task stack + TCB
@@ -272,7 +269,7 @@ inline void svg_screen_loaded_cb(lv_event_t *e) {
 // --------------------------------------------------------------------------
 inline bool svg_setup_and_render(lv_obj_t *canvas_obj,
                                   const char *svg_data, size_t svg_data_size,
-                                  uint32_t width, uint32_t height) {
+                                  uint32_t width, uint32_t height, bool user_wants_hidden) {
     SvgContext *ctx = (SvgContext *)heap_caps_malloc(
         sizeof(SvgContext), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!ctx) return false;
@@ -284,6 +281,7 @@ inline bool svg_setup_and_render(lv_obj_t *canvas_obj,
     ctx->file_path     = nullptr;
     ctx->width         = width;
     ctx->height        = height;
+    ctx->user_wants_hidden = user_wants_hidden;  // Save user's 'hidden' config from YAML
 
     // Register screen events for PSRAM lifecycle
     lv_obj_t *screen = lv_obj_get_screen(canvas_obj);
@@ -302,7 +300,7 @@ inline bool svg_setup_and_render(lv_obj_t *canvas_obj,
 // --------------------------------------------------------------------------
 inline bool svg_setup_and_render_file(lv_obj_t *canvas_obj,
                                        const char *file_path,
-                                       uint32_t width, uint32_t height) {
+                                       uint32_t width, uint32_t height, bool user_wants_hidden) {
     SvgContext *ctx = (SvgContext *)heap_caps_malloc(
         sizeof(SvgContext), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!ctx) return false;
@@ -314,6 +312,7 @@ inline bool svg_setup_and_render_file(lv_obj_t *canvas_obj,
     ctx->file_path     = file_path;
     ctx->width         = width;
     ctx->height        = height;
+    ctx->user_wants_hidden = user_wants_hidden;  // Save user's 'hidden' config from YAML
 
     lv_obj_t *screen = lv_obj_get_screen(canvas_obj);
     lv_obj_add_event_cb(screen, svg_screen_unload_start_cb,
