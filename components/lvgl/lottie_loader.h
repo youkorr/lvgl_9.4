@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include <cstring>
 #include <lvgl.h>
+#include <src/misc/lv_timer.h>
 #include <src/widgets/lottie/lv_lottie_private.h>
 
 namespace esphome {
