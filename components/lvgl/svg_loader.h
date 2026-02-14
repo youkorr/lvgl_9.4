@@ -37,6 +37,7 @@ struct SvgContext {
     StaticTask_t *task_tcb;     // internal RAM
     TaskHandle_t task_handle;
     volatile bool task_done;    // set by render task when finished
+    bool user_wants_hidden;     // Save user's 'hidden' config before forcing hide during render
 };
 
 // --------------------------------------------------------------------------
@@ -122,9 +123,11 @@ inline void svg_render_task(void *param) {
         ESP_LOGI(SVG_TAG, "SVG rendered OK");
     }
 
-    // Show canvas
+    // Restore user's 'hidden' configuration (only show if user didn't set hidden: true)
     lv_lock();
-    lv_obj_remove_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);
+    if (!ctx->user_wants_hidden) {
+        lv_obj_remove_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_invalidate(ctx->canvas_obj);
     lv_unlock();
 
@@ -185,6 +188,9 @@ inline bool svg_launch(SvgContext *ctx) {
                      ctx->pixel_buffer, buf_bytes);
     lv_draw_buf_set_flag(ctx->draw_buf, LV_IMAGE_FLAGS_MODIFIABLE);
     lv_canvas_set_draw_buf(ctx->canvas_obj, ctx->draw_buf);
+
+    // Save user's 'hidden' configuration before temporarily hiding during render
+    ctx->user_wants_hidden = lv_obj_has_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);
 
     // Hide until rendering finishes
     lv_obj_add_flag(ctx->canvas_obj, LV_OBJ_FLAG_HIDDEN);

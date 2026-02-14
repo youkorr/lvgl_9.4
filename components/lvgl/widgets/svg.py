@@ -213,8 +213,8 @@ class SvgType(WidgetType):
         # Set widget size
         lv_obj.set_size(w.obj, width, height)
 
-        # Hide until rendering completes (async task will unhide).
-        lv_obj.add_flag(w.obj, literal("LV_OBJ_FLAG_HIDDEN"))
+        # Note: Widget visibility during async render is managed by svg_loader.h
+        # (user's 'hidden' config is saved and restored after rendering)
 
         # Add include once
         if not _svg_include_added:

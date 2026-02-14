@@ -193,8 +193,8 @@ class LottieType(WidgetType):
         # Set widget size
         lv_obj.set_size(w.obj, width, height)
 
-        # CRITICAL: Hide widget until data is loaded.
-        lv_obj.add_flag(w.obj, literal("LV_OBJ_FLAG_HIDDEN"))
+        # Note: Widget visibility during async load is managed by lottie_loader.h
+        # (user's 'hidden' config is saved and restored after rendering)
 
         # Add include for lottie loader helper (once)
         if not _lottie_include_added:

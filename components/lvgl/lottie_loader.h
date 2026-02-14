@@ -47,6 +47,7 @@ struct LottieContext {
     StaticTask_t *task_tcb;     // internal RAM
     TaskHandle_t task_handle;
     volatile bool stop_requested;
+    bool user_wants_hidden;     // Save user's 'hidden' config before forcing hide during load
 };
 
 // --------------------------------------------------------------------------
@@ -129,8 +130,10 @@ inline void lottie_load_task(void *param) {
         lv_lottie_set_buffer(ctx->obj, ctx->width, ctx->height, ctx->pixel_buffer);
     }
 
-    // Show widget
-    lv_obj_remove_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+    // Restore user's 'hidden' configuration (only show if user didn't set hidden: true)
+    if (!ctx->user_wants_hidden) {
+        lv_obj_remove_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+    }
 
     lv_unlock();
 
@@ -225,6 +228,9 @@ inline bool lottie_launch(LottieContext *ctx) {
         return false;
     }
     memset(ctx->pixel_buffer, 0, buf_bytes);
+
+    // Save user's 'hidden' configuration before temporarily hiding during load
+    ctx->user_wants_hidden = lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
 
     // Hide until the task sets the buffer and loads data
     lv_obj_add_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
