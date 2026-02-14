@@ -4,6 +4,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include <cstring>
@@ -46,6 +47,21 @@ struct LottieContext {
 // Forward declarations
 inline void lottie_free_resources(LottieContext *ctx);
 inline bool lottie_launch(LottieContext *ctx);
+
+// FreeRTOS timer callback for deferred launch (executes AFTER rendering)
+// This is called from timer task context, not from LVGL rendering
+static void lottie_deferred_launch_timer(TimerHandle_t xTimer) {
+    LottieContext *ctx = (LottieContext *)pvTimerGetTimerID(xTimer);
+
+    ESP_LOGI(LOTTIE_TAG, "Deferred launch executing (timer context)");
+
+    // Launch the Lottie safely outside of LVGL rendering cycle
+    lv_lock();
+    lottie_launch(ctx);
+    lv_unlock();
+
+    // Timer is one-shot, will be automatically deleted by FreeRTOS
+}
 
 
 
@@ -319,16 +335,14 @@ inline void lottie_screen_loaded_cb(lv_event_t *e) {
     LottieContext *ctx =
         (LottieContext *)lv_event_get_user_data(e);
 
-    // Launch in two cases:
-    // 1. Widget was NOT initially hidden in YAML (e.g., screensaver) → auto-reload
-    // 2. Widget has pending_lazy_launch flag (became visible after being hidden)
-    if (ctx->pixel_buffer == nullptr) {
-        if (!ctx->initial_hidden || ctx->pending_lazy_launch) {
-            ESP_LOGI(LOTTIE_TAG, "Launching: initial_hidden=%d, pending_lazy=%d",
-                     ctx->initial_hidden, ctx->pending_lazy_launch);
-            ctx->pending_lazy_launch = false;  // Clear flag before launch
-            lottie_launch(ctx);
-        }
+    // Only reload if widget was NOT initially hidden in YAML
+    // Use initial_hidden instead of current flag because widget may be temporarily
+    // hidden during loading. This ensures:
+    // - Visible widgets (e.g., screensaver) always reload
+    // - Hidden widgets (e.g., weather) use lazy loading via timer
+    if (ctx->pixel_buffer == nullptr && !ctx->initial_hidden) {
+        ESP_LOGI(LOTTIE_TAG, "Screen loaded, launching visible widget");
+        lottie_launch(ctx);
     }
 }
 
@@ -340,15 +354,30 @@ inline void lottie_widget_draw_cb(lv_event_t *e) {
     // If we reach here and buffer is null, it means widget just became visible
     // This handles lazy loading for hidden weather widgets that become visible
     if (ctx->pixel_buffer == nullptr && ctx->task_handle == nullptr && !ctx->pending_lazy_launch) {
-        ESP_LOGI(LOTTIE_TAG, "Widget became visible, marking for deferred launch");
+        ESP_LOGI(LOTTIE_TAG, "Widget became visible, creating deferred launch timer");
 
         // ⚠️ CRITICAL: Cannot call lottie_launch() directly here!
         // We're inside LV_EVENT_DRAW_MAIN_BEGIN (rendering in progress)
         // Modifying objects (lv_obj_add_flag) causes assertion failures
-        // Solution: Mark widget for deferred launch, will be launched in
-        // lottie_screen_loaded_cb which executes outside of rendering cycle
+        // Solution: Create a one-shot FreeRTOS timer (50ms) to launch after rendering
 
         ctx->pending_lazy_launch = true;
+
+        TimerHandle_t timer = xTimerCreate(
+            "lottie_defer",                   // Timer name
+            pdMS_TO_TICKS(50),                // 50ms delay (after render completes)
+            pdFALSE,                          // One-shot (not periodic)
+            (void *)ctx,                      // Timer ID = context pointer
+            lottie_deferred_launch_timer      // Callback function
+        );
+
+        if (timer != nullptr) {
+            xTimerStart(timer, 0);
+            ESP_LOGI(LOTTIE_TAG, "Deferred launch timer started (50ms)");
+        } else {
+            ESP_LOGE(LOTTIE_TAG, "Failed to create deferred launch timer!");
+            ctx->pending_lazy_launch = false;
+        }
     }
 }
 
