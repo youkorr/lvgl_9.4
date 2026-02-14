@@ -40,8 +40,6 @@ struct LottieContext {
     volatile bool stop_requested;
 };
 
-
-
 // ============================================================
 // LOTTIE TASK
 // ============================================================
@@ -94,8 +92,6 @@ inline void lottie_load_task(void *param) {
 
     lv_unlock();
 
-
-
     if (!ctx->data_loaded || ctx->exec_cb == nullptr ||
         ctx->duration_ms == 0 || ctx->end_frame <= ctx->start_frame) {
 
@@ -110,17 +106,27 @@ inline void lottie_load_task(void *param) {
         return;
     }
 
-
-
     int32_t total_frames = ctx->end_frame - ctx->start_frame;
     uint32_t frame_delay_ms = ctx->duration_ms / (uint32_t)total_frames;
-
     if (frame_delay_ms < 16)  frame_delay_ms = 16;
     if (frame_delay_ms > 100) frame_delay_ms = 100;
 
     TickType_t start_tick = xTaskGetTickCount();
 
+    // ===================== MODIFICATION =====================
+    // Gère hidden: true et empêche watchdog
     while (!ctx->stop_requested) {
+
+        // Suspend l'animation si l'objet est caché
+        if (lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN)) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        // Vérifie si l'objet est toujours valide
+        if (!lv_obj_is_valid(ctx->obj)) {
+            break;
+        }
 
         uint32_t elapsed_ms =
             (uint32_t)((xTaskGetTickCount() - start_tick) * portTICK_PERIOD_MS);
@@ -133,34 +139,29 @@ inline void lottie_load_task(void *param) {
                     (int32_t)((int64_t)total_frames * phase / ctx->duration_ms);
         } else {
             if (elapsed_ms >= ctx->duration_ms) {
-                if (!ctx->stop_requested) {
-                    lv_lock();
-                    ctx->exec_cb(ctx->anim_var, ctx->end_frame);
-                    lv_unlock();
-                }
+                lv_lock();
+                ctx->exec_cb(ctx->anim_var, ctx->end_frame);
+                lv_unlock();
                 break;
             }
             frame = ctx->start_frame +
                     (int32_t)((int64_t)total_frames * elapsed_ms / ctx->duration_ms);
         }
 
-        if (ctx->stop_requested)
-            break;
-
         lv_lock();
         ctx->exec_cb(ctx->anim_var, frame);
         lv_unlock();
 
+        // Limite le CPU pour ne pas déclencher watchdog
         vTaskDelay(pdMS_TO_TICKS(frame_delay_ms));
     }
+    // ==========================================================
 
     ESP_LOGI(LOTTIE_TAG, "Task exiting cleanly");
 
     ctx->task_handle = nullptr;
     vTaskDelete(NULL);
 }
-
-
 
 // ============================================================
 // RESOURCE FREE
@@ -187,8 +188,6 @@ inline void lottie_free_resources(LottieContext *ctx) {
 
     ctx->stop_requested = false;
 }
-
-
 
 // ============================================================
 // LAUNCH
@@ -238,8 +237,6 @@ inline bool lottie_launch(LottieContext *ctx) {
     return ctx->task_handle != nullptr;
 }
 
-
-
 // ============================================================
 // SCREEN EVENTS
 // ============================================================
@@ -268,8 +265,6 @@ inline void lottie_screen_loaded_cb(lv_event_t *e) {
         lottie_launch(ctx);
     }
 }
-
-
 
 // ============================================================
 // INIT
@@ -327,4 +322,6 @@ inline bool lottie_init(lv_obj_t *obj,
 }  // namespace esphome
 
 #endif
+
+
 
