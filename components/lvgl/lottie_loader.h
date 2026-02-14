@@ -38,6 +38,7 @@ struct LottieContext {
     StaticTask_t *task_tcb;
     TaskHandle_t task_handle;
     volatile bool stop_requested;
+    volatile bool is_paused;  // NEW: Track if animation is paused due to hidden state
 };
 
 
@@ -119,8 +120,34 @@ inline void lottie_load_task(void *param) {
     if (frame_delay_ms > 100) frame_delay_ms = 100;
 
     TickType_t start_tick = xTaskGetTickCount();
+    TickType_t pause_start_tick = 0;
 
     while (!ctx->stop_requested) {
+
+        // Check if widget is hidden - if so, pause animation to save CPU
+        lv_lock();
+        bool is_hidden = lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+        lv_unlock();
+
+        if (is_hidden) {
+            if (!ctx->is_paused) {
+                // Just became hidden - save pause timestamp
+                pause_start_tick = xTaskGetTickCount();
+                ctx->is_paused = true;
+                ESP_LOGI(LOTTIE_TAG, "Animation paused (widget hidden)");
+            }
+            // Sleep longer while paused to save CPU
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        } else {
+            if (ctx->is_paused) {
+                // Just became visible - adjust start tick to account for pause duration
+                TickType_t pause_duration = xTaskGetTickCount() - pause_start_tick;
+                start_tick += pause_duration;
+                ctx->is_paused = false;
+                ESP_LOGI(LOTTIE_TAG, "Animation resumed (widget visible)");
+            }
+        }
 
         uint32_t elapsed_ms =
             (uint32_t)((xTaskGetTickCount() - start_tick) * portTICK_PERIOD_MS);
@@ -186,6 +213,7 @@ inline void lottie_free_resources(LottieContext *ctx) {
     if (ctx->pixel_buffer) { heap_caps_free(ctx->pixel_buffer); ctx->pixel_buffer = nullptr; }
 
     ctx->stop_requested = false;
+    ctx->is_paused = false;
 }
 
 
@@ -225,13 +253,14 @@ inline bool lottie_launch(LottieContext *ctx) {
     }
 
     ctx->stop_requested = false;
+    ctx->is_paused = false;
 
     ctx->task_handle = xTaskCreateStatic(
         lottie_load_task,
         "lottie_anim",
         LOTTIE_TASK_STACK_SIZE / sizeof(StackType_t),
         ctx,
-        5,
+        1,  // LOW PRIORITY to prevent CPU monopolization
         ctx->task_stack,
         ctx->task_tcb);
 
