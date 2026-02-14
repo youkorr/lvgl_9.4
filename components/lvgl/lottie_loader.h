@@ -8,7 +8,6 @@
 #include "esp_log.h"
 #include <cstring>
 #include <lvgl.h>
-#include <src/misc/lv_timer.h>
 #include <src/widgets/lottie/lv_lottie_private.h>
 
 namespace esphome {
@@ -47,17 +46,18 @@ struct LottieContext {
 inline void lottie_free_resources(LottieContext *ctx);
 inline bool lottie_launch(LottieContext *ctx);
 
-// Timer callback for deferred launch (called AFTER rendering)
-inline void lottie_deferred_launch_timer_cb(lv_timer_t *timer) {
-    LottieContext *ctx = (LottieContext *)timer->user_data;
+// One-shot callback for deferred launch (called AFTER rendering completes)
+// Uses LV_EVENT_REFR_READY which triggers when display refresh is done
+inline void lottie_deferred_launch_cb(lv_event_t *e) {
+    LottieContext *ctx = (LottieContext *)lv_event_get_user_data(e);
 
     ESP_LOGI(LOTTIE_TAG, "Deferred launch executing (after rendering)");
 
     // Launch the Lottie safely outside of rendering cycle
     lottie_launch(ctx);
 
-    // Delete the one-shot timer
-    lv_timer_del(timer);
+    // Remove this one-shot event handler
+    lv_obj_remove_event_cb(lv_event_get_current_target(e), lottie_deferred_launch_cb);
 }
 
 
@@ -355,16 +355,16 @@ inline void lottie_widget_draw_cb(lv_event_t *e) {
         // ⚠️ CRITICAL: Cannot call lottie_launch() directly here!
         // We're inside LV_EVENT_DRAW_MAIN_BEGIN (rendering in progress)
         // Modifying objects during rendering causes assertion failures
-        // Solution: Use a one-shot timer to launch AFTER rendering completes
+        // Solution: Add a one-shot event handler for LV_EVENT_REFR_READY
+        // which triggers AFTER the current rendering cycle completes
 
-        lv_timer_t *timer = lv_timer_create(
-            lottie_deferred_launch_timer_cb,  // Callback
-            10,                                // 10ms delay (after render)
-            ctx                                // User data
+        lv_display_t *disp = lv_obj_get_disp(ctx->obj);
+        lv_obj_add_event_cb(
+            lv_display_get_screen_active(disp),
+            lottie_deferred_launch_cb,
+            LV_EVENT_REFR_READY,
+            ctx
         );
-
-        // Make it a one-shot timer
-        lv_timer_set_repeat_count(timer, 1);
     }
 }
 
