@@ -39,6 +39,7 @@ struct LottieContext {
     TaskHandle_t task_handle;
     volatile bool stop_requested;
     volatile bool is_paused;  // NEW: Track if animation is paused due to hidden state
+    bool initial_hidden;  // Track if widget was initially hidden in YAML
 };
 
 
@@ -91,7 +92,12 @@ inline void lottie_load_task(void *param) {
         lv_lottie_set_buffer(ctx->obj, ctx->width, ctx->height, ctx->pixel_buffer);
     }
 
-    lv_obj_remove_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+    // Restore visibility based on initial state
+    // If widget was NOT hidden in YAML, show it now that data is loaded
+    // If widget WAS hidden in YAML (e.g., weather widgets), keep it hidden
+    if (!ctx->initial_hidden) {
+        lv_obj_remove_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+    }
 
     lv_unlock();
 
@@ -235,6 +241,11 @@ inline bool lottie_launch(LottieContext *ctx) {
 
     memset(ctx->pixel_buffer, 0, buf_bytes);
 
+    // Save initial hidden state before hiding during load
+    // This allows us to restore the correct visibility after loading
+    ctx->initial_hidden = lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+
+    // Hide widget temporarily during load to prevent displaying empty/glitchy content
     lv_obj_add_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
 
     ctx->task_stack =
