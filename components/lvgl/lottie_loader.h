@@ -15,7 +15,7 @@ namespace esphome {
 namespace lvgl {
 
 static const char *const LOTTIE_TAG = "lottie";
-static constexpr size_t LOTTIE_TASK_STACK_SIZE = 128 * 1024;  // 128KB - rlottie JSON parser needs deep recursion stack
+static constexpr size_t LOTTIE_TASK_STACK_SIZE = 96 * 1024;  // 96KB - balanced for rlottie parser without excessive memory
 
 // Global mutex to serialize Lottie JSON parsing (prevents simultaneous stack-heavy operations)
 static SemaphoreHandle_t lottie_parse_mutex = nullptr;
@@ -61,8 +61,14 @@ inline void lottie_load_task(void *param) {
 
     // ⚠️ CRITICAL: Acquire mutex BEFORE parsing JSON to serialize stack-heavy operations
     // This prevents multiple Lottie widgets from parsing simultaneously and causing stack overflow
+    // Use timeout to prevent infinite blocking if another task crashes while holding mutex
     if (lottie_parse_mutex != nullptr) {
-        xSemaphoreTake(lottie_parse_mutex, portMAX_DELAY);
+        if (xSemaphoreTake(lottie_parse_mutex, pdMS_TO_TICKS(10000)) != pdTRUE) {
+            ESP_LOGE(LOTTIE_TAG, "Failed to acquire parse mutex (timeout 10s) - another task may have crashed");
+            ctx->task_handle = nullptr;
+            vTaskDelete(NULL);
+            return;
+        }
     }
 
     lv_lock();
@@ -118,6 +124,7 @@ inline void lottie_load_task(void *param) {
     if (!ctx->data_loaded || ctx->exec_cb == nullptr ||
         ctx->duration_ms == 0 || ctx->end_frame <= ctx->start_frame) {
 
+        ESP_LOGW(LOTTIE_TAG, "Lottie load failed or invalid animation data");
         ctx->task_handle = nullptr;
         vTaskDelete(NULL);
         return;
