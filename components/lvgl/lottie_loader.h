@@ -322,6 +322,21 @@ inline void lottie_widget_draw_cb(lv_event_t *e) {
     }
 }
 
+inline void lottie_widget_visibility_cb(lv_event_t *e) {
+    LottieContext *ctx =
+        (LottieContext *)lv_event_get_user_data(e);
+
+    // Check if widget just became visible but resources are not allocated
+    // This handles the case where widget becomes visible AFTER page reload
+    // (e.g., weather condition changes and hidden Lottie needs to show)
+    if (ctx->pixel_buffer == nullptr &&
+        ctx->task_handle == nullptr &&
+        !lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN)) {
+        ESP_LOGI(LOTTIE_TAG, "Widget became visible, lazy loading now");
+        lottie_launch(ctx);
+    }
+}
+
 
 
 // ============================================================
@@ -378,6 +393,14 @@ inline bool lottie_init(lv_obj_t *obj,
     lv_obj_add_event_cb(obj,
                         lottie_widget_draw_cb,
                         LV_EVENT_DRAW_MAIN_BEGIN,
+                        ctx);
+
+    // Add visibility check callback to detect when hidden widgets become visible
+    // This uses COVER_CHECK which is called during layout/rendering even for hidden objects
+    // allowing us to detect visibility changes (e.g., weather condition changing)
+    lv_obj_add_event_cb(obj,
+                        lottie_widget_visibility_cb,
+                        LV_EVENT_COVER_CHECK,
                         ctx);
 
     return lottie_launch(ctx);
