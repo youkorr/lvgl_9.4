@@ -42,6 +42,9 @@ struct LottieContext {
     bool initial_hidden;  // Track if widget was initially hidden in YAML
 };
 
+// Forward declarations
+inline void lottie_free_resources(LottieContext *ctx);
+
 
 
 // ============================================================
