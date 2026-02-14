@@ -40,25 +40,12 @@ struct LottieContext {
     volatile bool stop_requested;
     volatile bool is_paused;  // NEW: Track if animation is paused due to hidden state
     bool initial_hidden;  // Track if widget was initially hidden in YAML
+    bool pending_lazy_launch;  // Flag for deferred launch when widget becomes visible
 };
 
 // Forward declarations
 inline void lottie_free_resources(LottieContext *ctx);
 inline bool lottie_launch(LottieContext *ctx);
-
-// One-shot callback for deferred launch (called AFTER rendering completes)
-// Uses LV_EVENT_REFR_READY which triggers when display refresh is done
-inline void lottie_deferred_launch_cb(lv_event_t *e) {
-    LottieContext *ctx = (LottieContext *)lv_event_get_user_data(e);
-
-    ESP_LOGI(LOTTIE_TAG, "Deferred launch executing (after rendering)");
-
-    // Launch the Lottie safely outside of rendering cycle
-    lottie_launch(ctx);
-
-    // Remove this one-shot event handler
-    lv_obj_remove_event_cb(lv_event_get_current_target(e), lottie_deferred_launch_cb);
-}
 
 
 
@@ -332,13 +319,16 @@ inline void lottie_screen_loaded_cb(lv_event_t *e) {
     LottieContext *ctx =
         (LottieContext *)lv_event_get_user_data(e);
 
-    // Only reload if widget was NOT initially hidden in YAML
-    // Use initial_hidden instead of current flag because widget may be temporarily
-    // hidden during loading. This ensures:
-    // - Visible widgets (e.g., screensaver) always reload
-    // - Hidden widgets (e.g., weather) use lazy loading via visibility callback
-    if (ctx->pixel_buffer == nullptr && !ctx->initial_hidden) {
-        lottie_launch(ctx);
+    // Launch in two cases:
+    // 1. Widget was NOT initially hidden in YAML (e.g., screensaver) → auto-reload
+    // 2. Widget has pending_lazy_launch flag (became visible after being hidden)
+    if (ctx->pixel_buffer == nullptr) {
+        if (!ctx->initial_hidden || ctx->pending_lazy_launch) {
+            ESP_LOGI(LOTTIE_TAG, "Launching: initial_hidden=%d, pending_lazy=%d",
+                     ctx->initial_hidden, ctx->pending_lazy_launch);
+            ctx->pending_lazy_launch = false;  // Clear flag before launch
+            lottie_launch(ctx);
+        }
     }
 }
 
@@ -349,22 +339,16 @@ inline void lottie_widget_draw_cb(lv_event_t *e) {
     // LV_EVENT_DRAW_MAIN_BEGIN is ONLY called when widget is visible (not hidden)
     // If we reach here and buffer is null, it means widget just became visible
     // This handles lazy loading for hidden weather widgets that become visible
-    if (ctx->pixel_buffer == nullptr && ctx->task_handle == nullptr) {
-        ESP_LOGI(LOTTIE_TAG, "Widget became visible, scheduling deferred launch");
+    if (ctx->pixel_buffer == nullptr && ctx->task_handle == nullptr && !ctx->pending_lazy_launch) {
+        ESP_LOGI(LOTTIE_TAG, "Widget became visible, marking for deferred launch");
 
         // ⚠️ CRITICAL: Cannot call lottie_launch() directly here!
         // We're inside LV_EVENT_DRAW_MAIN_BEGIN (rendering in progress)
-        // Modifying objects during rendering causes assertion failures
-        // Solution: Add a one-shot event handler for LV_EVENT_REFR_READY
-        // which triggers AFTER the current rendering cycle completes
+        // Modifying objects (lv_obj_add_flag) causes assertion failures
+        // Solution: Mark widget for deferred launch, will be launched in
+        // lottie_screen_loaded_cb which executes outside of rendering cycle
 
-        lv_display_t *disp = lv_obj_get_disp(ctx->obj);
-        lv_obj_add_event_cb(
-            lv_display_get_screen_active(disp),
-            lottie_deferred_launch_cb,
-            LV_EVENT_REFR_READY,
-            ctx
-        );
+        ctx->pending_lazy_launch = true;
     }
 }
 
