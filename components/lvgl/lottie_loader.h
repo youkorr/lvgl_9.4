@@ -293,7 +293,20 @@ inline void lottie_screen_loaded_cb(lv_event_t *e) {
     LottieContext *ctx =
         (LottieContext *)lv_event_get_user_data(e);
 
-    if (ctx->pixel_buffer == nullptr) {
+    // Only reload if widget is visible - hidden widgets should stay paused
+    if (ctx->pixel_buffer == nullptr && !lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN)) {
+        lottie_launch(ctx);
+    }
+}
+
+inline void lottie_widget_draw_cb(lv_event_t *e) {
+    LottieContext *ctx =
+        (LottieContext *)lv_event_get_user_data(e);
+
+    // If widget is being drawn but resources are not allocated (lazy loading)
+    // This happens when a hidden widget becomes visible after screen reload
+    if (ctx->pixel_buffer == nullptr && !lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN)) {
+        ESP_LOGI(LOTTIE_TAG, "Lazy loading widget (became visible after reload)");
         lottie_launch(ctx);
     }
 }
@@ -347,6 +360,13 @@ inline bool lottie_init(lv_obj_t *obj,
     lv_obj_add_event_cb(screen,
                         lottie_screen_loaded_cb,
                         LV_EVENT_SCREEN_LOADED,
+                        ctx);
+
+    // Add event listener on the widget itself to handle lazy loading
+    // when a hidden widget becomes visible after screen reload
+    lv_obj_add_event_cb(obj,
+                        lottie_widget_draw_cb,
+                        LV_EVENT_DRAW_MAIN_BEGIN,
                         ctx);
 
     return lottie_launch(ctx);
