@@ -77,8 +77,6 @@ lvgl:
                 radius: 0
                 border_width: 0
                 pad_all: 0
-                pad_row: 8
-                pad_column: 0
                 scrollbar_mode: "off"
                 layout:
                   type: FLEX
