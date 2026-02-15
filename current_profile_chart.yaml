@@ -178,6 +178,7 @@ lvgl:
                 width: 65
                 height: 360
                 mode: VERTICAL_LEFT
+                text_color: 0xFFFFFF
                 min_value: -100
                 max_value: 1500
                 ticks:
