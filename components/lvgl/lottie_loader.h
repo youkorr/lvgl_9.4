@@ -233,11 +233,13 @@ inline void lottie_free_resources(LottieContext *ctx) {
 // because it triggers ThorVG rendering which needs the 64 KB stack.
 // --------------------------------------------------------------------------
 inline bool lottie_launch(LottieContext *ctx) {
-    // Capture the widget's current HIDDEN flag BEFORE we force-hide.
-    // ESPHome's on_load fires at SCREEN_LOAD_START (before SCREEN_LOADED),
-    // so the user's script has already run and set the correct visibility.
-    // We save it here so the task can restore it after loading completes.
-    ctx->runtime_hidden = lv_obj_has_flag(ctx->obj, LV_OBJ_FLAG_HIDDEN);
+    // NOTE: Do NOT re-capture runtime_hidden here!
+    // On re-loads the widget is already hidden (by lottie_screen_unload_start_cb),
+    // so reading LV_OBJ_FLAG_HIDDEN would always return true, losing the real
+    // visibility state that was correctly saved in the unload callback.
+    // runtime_hidden is set by:
+    //   - lottie_init()                      → first load (from YAML config)
+    //   - lottie_screen_unload_start_cb()    → re-loads  (actual state before hide)
 
     // Allocate pixel buffer in PSRAM
     size_t buf_bytes = (size_t)ctx->width * ctx->height * 4;
