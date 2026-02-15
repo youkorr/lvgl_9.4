@@ -361,7 +361,11 @@ inline bool lottie_init(lv_obj_t *obj, const void *data, size_t data_size,
     // via lv_obj_get_user_data() for lottie_restart() calls
     lv_obj_set_user_data(obj, ctx);
 
-    // Register screen events for PSRAM lifecycle (two-phase unload)
+    // Register screen events for PSRAM lifecycle (two-phase unload).
+    // IMPORTANT: We do NOT call lottie_launch() here.  Resources are only
+    // allocated when the page actually becomes visible (SCREEN_LOADED event).
+    // This prevents non-active pages from consuming PSRAM at startup.
+    // With 19+ widgets across multiple pages, this saves megabytes of PSRAM.
     lv_obj_t *screen = lv_obj_get_screen(obj);
     lv_obj_add_event_cb(screen, lottie_screen_unload_start_cb,
                         LV_EVENT_SCREEN_UNLOAD_START, ctx);
@@ -370,7 +374,9 @@ inline bool lottie_init(lv_obj_t *obj, const void *data, size_t data_size,
     lv_obj_add_event_cb(screen, lottie_screen_loaded_cb,
                         LV_EVENT_SCREEN_LOADED, ctx);
 
-    return lottie_launch(ctx);
+    ESP_LOGI(LOTTIE_TAG, "Lottie registered (%ux%u), waiting for page load to allocate",
+             (unsigned)width, (unsigned)height);
+    return true;
 }
 
 }  // namespace lvgl
