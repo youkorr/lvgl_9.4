@@ -9,7 +9,7 @@ from ..defines import CONF_ITEMS, CONF_MAIN, call_lambda, literal
 from ..helpers import add_lv_use, lvgl_components_required
 from ..lv_validation import lv_int
 from ..lvcode import lv, lv_add
-from ..types import LV_EVENT, LvCompound, LvType, ObjUpdateAction
+from ..types import LvCompound, LvType, ObjUpdateAction
 from . import Widget, WidgetType, get_widgets
 
 CONF_CALENDAR = "calendar"
@@ -118,6 +118,15 @@ class CalendarType(WidgetType):
         elif header == HEADER_DROPDOWN:
             add_lv_use("CALENDAR_HEADER_DROPDOWN")
             lv.calendar_header_dropdown_create(w.obj)
+            # LVGL default year list only goes to 2025. Set a wider range.
+            wid = str(config[CONF_ID])
+            year_list = "\\n".join(str(y) for y in range(2036, 2019, -1))
+            lv_add(cg.RawExpression(
+                f'static const char * {wid}_year_list = "{year_list}"'
+            ))
+            lv.calendar_header_dropdown_set_year_list(
+                w.obj, cg.RawExpression(f"{wid}_year_list")
+            )
 
         # Set custom day names (array of 7 strings)
         if day_names := config.get(CONF_DAY_NAMES):
@@ -143,8 +152,6 @@ class CalendarType(WidgetType):
             year = await lv_int.process(showed.get(CONF_YEAR, 2024))
             month = await lv_int.process(showed.get(CONF_MONTH, 1))
             lv.calendar_set_month_shown(w.obj, year, month)
-            # Notify dropdown header to sync its displayed month/year
-            lv.event_send(w.obj, LV_EVENT.VALUE_CHANGED, cg.nullptr)
 
         # Set highlighted dates
         if highlighted := config.get(CONF_HIGHLIGHTED_DATES):
@@ -212,8 +219,6 @@ async def calendar_update_to_code(config, action_id, template_arg, args):
             year = await process_date_field(showed.get(CONF_YEAR), 2024)
             month = await process_date_field(showed.get(CONF_MONTH), 1)
             lv.calendar_set_month_shown(w.obj, year, month)
-            # Notify dropdown header to sync its displayed month/year
-            lv.event_send(w.obj, LV_EVENT.VALUE_CHANGED, cg.nullptr)
 
         # Update highlighted dates
         if highlighted := config.get(CONF_HIGHLIGHTED_DATES):
