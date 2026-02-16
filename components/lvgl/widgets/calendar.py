@@ -5,7 +5,7 @@ from esphome.const import CONF_DATE, CONF_ID, CONF_YEAR
 
 from ..automation import action_to_code
 from ..defines import CONF_ITEMS, CONF_MAIN, literal
-from ..helpers import lvgl_components_required
+from ..helpers import add_lv_use, lvgl_components_required
 from ..lv_validation import lv_int
 from ..lvcode import lv, lv_add
 from ..types import LvCompound, LvType, ObjUpdateAction
@@ -17,6 +17,13 @@ CONF_SHOWED_DATE = "showed_date"
 CONF_HIGHLIGHTED_DATES = "highlighted_dates"
 CONF_MONTH = "month"
 CONF_DAY = "day"
+CONF_HEADER = "header"
+CONF_DAY_NAMES = "day_names"
+
+# Header type constants matching LVGL documentation
+HEADER_ARROW = "arrow"
+HEADER_DROPDOWN = "dropdown"
+HEADER_NONE = "none"
 
 # Calendar returns selected date as year, month, day
 lv_calendar_t = LvType(
@@ -53,11 +60,24 @@ def date_schema(required=False):
     )
 
 
-CALENDAR_SCHEMA = cv.Schema(
+# Schema for runtime updates (header and day_names are creation-time only)
+CALENDAR_MODIFY_SCHEMA = cv.Schema(
     {
         cv.Optional(CONF_TODAY_DATE): date_schema(),
         cv.Optional(CONF_SHOWED_DATE): date_schema(),
         cv.Optional(CONF_HIGHLIGHTED_DATES): cv.ensure_list(date_schema(required=True)),
+    }
+)
+
+# Full schema for widget creation
+CALENDAR_SCHEMA = CALENDAR_MODIFY_SCHEMA.extend(
+    {
+        cv.Optional(CONF_HEADER, default=HEADER_ARROW): cv.one_of(
+            HEADER_ARROW, HEADER_DROPDOWN, HEADER_NONE, lower=True
+        ),
+        cv.Optional(CONF_DAY_NAMES): cv.All(
+            cv.ensure_list(cv.string), cv.Length(min=7, max=7)
+        ),
     }
 )
 
@@ -69,13 +89,34 @@ class CalendarType(WidgetType):
             lv_calendar_t,
             (CONF_MAIN, CONF_ITEMS),
             CALENDAR_SCHEMA,
-            modify_schema=CALENDAR_SCHEMA,
+            modify_schema=CALENDAR_MODIFY_SCHEMA,
             lv_name="calendar",
         )
 
     async def to_code(self, w: Widget, config):
         """Generate code for calendar widget"""
         lvgl_components_required.add("CALENDAR")
+
+        # Add header for month navigation (per LVGL docs:
+        # https://docs.lvgl.io/master/widgets/calendar.html)
+        header = config.get(CONF_HEADER, HEADER_ARROW)
+        if header == HEADER_ARROW:
+            add_lv_use("CALENDAR_HEADER_ARROW")
+            lv.calendar_header_arrow_create(w.obj)
+        elif header == HEADER_DROPDOWN:
+            add_lv_use("CALENDAR_HEADER_DROPDOWN")
+            lv.calendar_header_dropdown_create(w.obj)
+
+        # Set custom day names (array of 7 strings)
+        if day_names := config.get(CONF_DAY_NAMES):
+            wid = str(config[CONF_ID])
+            names_str = ", ".join(f'"{name}"' for name in day_names)
+            lv_add(cg.RawExpression(
+                f"static const char * {wid}_day_names[] = {{{names_str}}}"
+            ))
+            lv.calendar_set_day_names(
+                w.obj, cg.RawExpression(f"{wid}_day_names")
+            )
 
         # Set today's date
         if today := config.get(CONF_TODAY_DATE):
@@ -84,7 +125,7 @@ class CalendarType(WidgetType):
             day = await lv_int.process(today.get(CONF_DAY, 1))
             lv.calendar_set_today_date(w.obj, year, month, day)
 
-        # Set showed date (initial display date)
+        # Set showed date (initial display month)
         if showed := config.get(CONF_SHOWED_DATE):
             year = await lv_int.process(showed.get(CONF_YEAR, 2024))
             month = await lv_int.process(showed.get(CONF_MONTH, 1))
@@ -93,25 +134,23 @@ class CalendarType(WidgetType):
 
         # Set highlighted dates
         if highlighted := config.get(CONF_HIGHLIGHTED_DATES):
-            # Create array of highlighted dates
             dates_count = len(highlighted)
             if dates_count > 0:
-                # Generate the highlighted dates array
-                dates_array_id = cg.RawExpression(f"{w.obj}_highlighted_dates")
+                wid = str(config[CONF_ID])
                 dates_elements = []
                 for date in highlighted:
                     year = date[CONF_YEAR]
                     month = date[CONF_MONTH]
                     day = date[CONF_DAY]
                     dates_elements.append(f"{{{year}, {month}, {day}}}")
-
                 dates_array_str = "{" + ", ".join(dates_elements) + "}"
-                dates_var = cg.RawExpression(
-                    f"static lv_calendar_date_t {dates_array_id}[] = {dates_array_str}"
-                )
-                lv_add(dates_var)
+                lv_add(cg.RawExpression(
+                    f"static lv_calendar_date_t {wid}_highlighted_dates[] = {dates_array_str}"
+                ))
                 lv.calendar_set_highlighted_dates(
-                    w.obj, dates_array_id, dates_count
+                    w.obj,
+                    cg.RawExpression(f"{wid}_highlighted_dates"),
+                    dates_count,
                 )
 
     def get_uses(self):
@@ -156,22 +195,21 @@ async def calendar_update_to_code(config, action_id, template_arg, args):
         if highlighted := config.get(CONF_HIGHLIGHTED_DATES):
             dates_count = len(highlighted)
             if dates_count > 0:
-                # Generate the highlighted dates array
-                dates_array_id = cg.RawExpression(f"{w.obj}_highlighted_dates_update")
+                wid = str(config[CONF_ID])
                 dates_elements = []
                 for date in highlighted:
                     year = date[CONF_YEAR]
                     month = date[CONF_MONTH]
                     day = date[CONF_DAY]
                     dates_elements.append(f"{{{year}, {month}, {day}}}")
-
                 dates_array_str = "{" + ", ".join(dates_elements) + "}"
-                dates_var = cg.RawExpression(
-                    f"static lv_calendar_date_t {dates_array_id}[] = {dates_array_str}"
-                )
-                lv_add(dates_var)
+                lv_add(cg.RawExpression(
+                    f"static lv_calendar_date_t {wid}_hl_dates_upd[] = {dates_array_str}"
+                ))
                 lv.calendar_set_highlighted_dates(
-                    w.obj, dates_array_id, dates_count
+                    w.obj,
+                    cg.RawExpression(f"{wid}_hl_dates_upd"),
+                    dates_count,
                 )
 
     return await action_to_code(
