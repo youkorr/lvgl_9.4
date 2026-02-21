@@ -1,10 +1,11 @@
 """
-LVGL v9.4 Chart Widget Implementation
+LVGL v9.5 Chart Widget Implementation
 
 The chart widget displays data visualization with support for:
 - LINE charts: Connected line series
 - BAR charts: Vertical or horizontal bars
 - SCATTER charts: Point-based data
+- CURVE charts: Smooth Bézier curves (requires Vector Graphics/ThorVG)
 - Multiple series per chart
 - Configurable axes and division lines
 - Cursors for point selection
@@ -84,12 +85,14 @@ CHART_TYPE_NONE = "NONE"
 CHART_TYPE_LINE = "LINE"
 CHART_TYPE_BAR = "BAR"
 CHART_TYPE_SCATTER = "SCATTER"
+CHART_TYPE_CURVE = "CURVE"  # LVGL 9.5: Bézier curved charts (requires ThorVG)
 
 CHART_TYPES = {
     CHART_TYPE_NONE: "LV_CHART_TYPE_NONE",
     CHART_TYPE_LINE: "LV_CHART_TYPE_LINE",
     CHART_TYPE_BAR: "LV_CHART_TYPE_BAR",
     CHART_TYPE_SCATTER: "LV_CHART_TYPE_SCATTER",
+    CHART_TYPE_CURVE: "LV_CHART_TYPE_CURVE",
 }
 
 # Update modes

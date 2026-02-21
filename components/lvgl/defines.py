@@ -376,6 +376,7 @@ STATES = (
     "pressed",
     "scrolled",
     "disabled",
+    "alt",  # LVGL 9.5: LV_STATE_ALT for dark/light mode switching
     "user_1",
     "user_2",
     "user_3",
@@ -476,6 +477,7 @@ OBJ_FLAGS = (
     "layout_1",
     "layout_2",
     "send_draw_task_events",
+    "radio_button",  # LVGL 9.5: LV_OBJ_FLAG_RADIO_BUTTON for radio group behavior
     "widget_1",
     "widget_2",
     "user_1",
@@ -541,6 +543,7 @@ LV_CHART_TYPES = (
     "LINE",
     "BAR",
     "SCATTER",
+    "CURVE",  # LVGL 9.5: Bézier curved charts (requires Vector Graphics/ThorVG)
 )
 LV_CHART_AXES = (
     "PRIMARY_Y",
